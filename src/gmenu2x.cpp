@@ -215,7 +215,7 @@ void GMenu2X::initCPULimits() {
 	//       other devices are not actively maintained.
 	// TODO: Read min and max from sysfs.
 #ifdef PLATFORM_SPICA //not sure about values, to be tested
-	cpuFreqMin = 66;
+	cpuFreqMin = 133;
 	cpuFreqMax = 800;
 	cpuFreqSafeMax = 800;
 	cpuFreqMenuDefault = 400;
@@ -1877,7 +1877,7 @@ void GMenu2X::scanner() {
 #elif defined(PLATFORM_DINGUX)
 	nandpath = "/media/ccnandb1";
 #elif defined(PLATFORM_SPICA)
-	nandpath = "/dev/mmcblk0p2" //temporary solution for not messing in internal flash
+	nandpath = "/dev/mmcblk0p2"; //temporary solution for not messing in internal flash
 #endif
 
 	if (nandpath) {
