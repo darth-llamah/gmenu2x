@@ -31,10 +31,11 @@ class ImageDialog : public FileDialog {
 protected:
 	SurfaceCollection previews;
 public:
-	ImageDialog(GMenu2X *gmenu2x, string text, string filter="", string file="");
+	ImageDialog(GMenu2X *gmenu2x, const string &text, const string &filter="", const string &file="");
 	virtual ~ImageDialog();
-	inline virtual void beforeFileList();
-	inline virtual void onChangeDir();
+
+	virtual void beforeFileList();
+	virtual void onChangeDir();
 };
 
 #endif /*IMAGEDIALOG_H_*/

@@ -25,10 +25,14 @@
 
 using namespace std;
 
-SettingsDialog::SettingsDialog(GMenu2X *gmenu2x, string text, string icon) {
-	this->gmenu2x = gmenu2x;
-	this->text = text;
-
+SettingsDialog::SettingsDialog(
+		GMenu2X *gmenu2x_, InputManager &inputMgr_, Touchscreen &ts_,
+		const string &text_, const string &icon)
+	: Dialog(gmenu2x_)
+	, inputMgr(inputMgr_)
+	, ts(ts_)
+	, text(text_)
+{
 	if (icon!="" && gmenu2x->sc[icon] != NULL)
 		this->icon = icon;
 	else
@@ -36,13 +40,13 @@ SettingsDialog::SettingsDialog(GMenu2X *gmenu2x, string text, string icon) {
 }
 
 SettingsDialog::~SettingsDialog() {
-	for (uint i=0; i<voices.size(); i++)
-		free(voices[i]);
+	for (vector<MenuSetting *>::iterator it = voices.begin(); it != voices.end(); ++it)
+		delete *it;
 }
 
 bool SettingsDialog::exec() {
-	//Surface bg (gmenu2x->confStr["wallpaper"],false);
 	Surface bg(gmenu2x->bg);
+	bg.convertToDisplayFormat();
 
 	bool close = false, ts_pressed = false;
 	uint i, sel = 0, iY, firstElement = 0, action;
@@ -55,14 +59,15 @@ bool SettingsDialog::exec() {
 
 	while (!close) {
 		action = SD_NO_ACTION;
-		if (gmenu2x->f200) gmenu2x->ts.poll();
+		if (ts.initialized()) ts.poll();
 
 		bg.blit(gmenu2x->s,0,0);
 
 		gmenu2x->drawTopBar(gmenu2x->s);
 		//link icon
-		gmenu2x->drawTitleIcon(icon);
-		gmenu2x->writeTitle(text);
+		drawTitleIcon(icon);
+		writeTitle(text);
+
 		gmenu2x->drawBottomBar(gmenu2x->s);
 
 		if (sel>firstElement+numRows-1) firstElement=sel-numRows+1;
@@ -73,19 +78,19 @@ bool SettingsDialog::exec() {
 		iY = gmenu2x->skinConfInt["topBarHeight"]+2+(iY*rowHeight);
 		gmenu2x->s->setClipRect(clipRect);
 		if (sel<voices.size())
-			gmenu2x->s->box(1, iY, 148, rowHeight-2, gmenu2x->skinConfColors["selectionBg"]);
+			gmenu2x->s->box(1, iY, 148, rowHeight-2, gmenu2x->skinConfColors[COLOR_SELECTION_BG]);
 		gmenu2x->s->clearClipRect();
 
 		//selected option
 		voices[sel]->drawSelected(iY);
 
 		gmenu2x->s->setClipRect(clipRect);
-		if (ts_pressed && !gmenu2x->ts.pressed()) ts_pressed = false;
-		if (gmenu2x->f200 && gmenu2x->ts.pressed() && !gmenu2x->ts.inRect(touchRect)) ts_pressed = false;
+		if (ts_pressed && !ts.pressed()) ts_pressed = false;
+		if (ts.initialized() && ts.pressed() && !ts.inRect(touchRect)) ts_pressed = false;
 		for (i=firstElement; i<voices.size() && i<firstElement+numRows; i++) {
 			iY = i-firstElement;
 			voices[i]->draw(iY*rowHeight+gmenu2x->skinConfInt["topBarHeight"]+2);
-			if (gmenu2x->f200 && gmenu2x->ts.pressed() && gmenu2x->ts.inRect(touchRect.x, touchRect.y+(iY*rowHeight), touchRect.w, rowHeight)) {
+			if (ts.initialized() && ts.pressed() && ts.inRect(touchRect.x, touchRect.y+(iY*rowHeight), touchRect.w, rowHeight)) {
 				ts_pressed = true;
 				sel = i;
 			}
@@ -95,33 +100,37 @@ bool SettingsDialog::exec() {
 		gmenu2x->drawScrollBar(numRows,voices.size(),firstElement,clipRect.y+1,clipRect.h);
 
 		//description
-		gmenu2x->writeSubTitle(voices[sel]->description);
+		writeSubTitle(voices[sel]->getDescription());
 
 		gmenu2x->s->flip();
 		voices[sel]->handleTS();
 
-		gmenu2x->input.update();
-		if ( gmenu2x->input[ACTION_START] ) action = SD_ACTION_CLOSE;
-		if ( gmenu2x->input[ACTION_UP   ] ) action = SD_ACTION_UP;
-		if ( gmenu2x->input[ACTION_DOWN ] ) action = SD_ACTION_DOWN;
-		voices[sel]->manageInput();
+        bevent_t event;
+        do {
+            inputMgr.waitForEvent(&event);
+        } while (event.state != PRESSED);
 
-		switch (action) {
-			case SD_ACTION_CLOSE: close = true; break;
-			case SD_ACTION_UP: {
-				if (sel==0)
-					sel = voices.size()-1;
-				else
-					sel -= 1;
-				gmenu2x->setInputSpeed();
-				voices[sel]->adjustInput();
-			} break;
-			case SD_ACTION_DOWN: {
-				sel += 1;
-				if (sel>=voices.size()) sel = 0;
-				gmenu2x->setInputSpeed();
-				voices[sel]->adjustInput();
-			} break;
+		if (voices[sel]->manageInput(&event) == false) {
+			switch (event.button) {
+				case SETTINGS:
+					close = true;
+					break;
+				case UP:
+					if (sel==0)
+						sel = voices.size()-1;
+					else
+						sel -= 1;
+					gmenu2x->setInputSpeed();
+					voices[sel]->adjustInput();
+					break;
+				case DOWN:
+					sel += 1;
+					if (sel>=voices.size()) sel = 0;
+					gmenu2x->setInputSpeed();
+					voices[sel]->adjustInput();
+				default:
+					break;
+			}
 		}
 	}
 

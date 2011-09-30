@@ -1,15 +1,26 @@
 #include "iconbutton.h"
 #include "gmenu2x.h"
+#include "surface.h"
 
 using namespace std;
 using namespace fastdelegate;
 
-IconButton::IconButton(GMenu2X *gmenu2x, string icon, string label) : Button(gmenu2x) {
-	this->gmenu2x = gmenu2x;
+IconButton::IconButton(GMenu2X *gmenu2x_, const string &icon,
+					   const string &label)
+	: Button(gmenu2x_->ts)
+	, gmenu2x(gmenu2x_)
+{
 	this->icon = icon;
 	labelPosition = IconButton::DISP_RIGHT;
 	labelMargin = 2;
 	this->setLabel(label);
+	updateSurfaces();
+}
+
+void IconButton::updateSurfaces()
+{
+	iconSurface = gmenu2x->sc[icon];
+	recalcSize();
 }
 
 void IconButton::setPosition(int x, int y) {
@@ -21,10 +32,10 @@ void IconButton::setPosition(int x, int y) {
 
 void IconButton::paint() {
 	uint margin = labelMargin;
-	if (gmenu2x->sc[icon] == NULL || label == "")
+	if (iconSurface == NULL || label == "")
 		margin = 0;
-	if (gmenu2x->sc[icon] != NULL)
-		gmenu2x->sc[icon]->blit(gmenu2x->s,iconRect);
+	if (iconSurface != NULL)
+		iconSurface->blit(gmenu2x->s,iconRect);
 	if (label != "")
 		gmenu2x->s->write(gmenu2x->font, label, labelRect.x, labelRect.y, labelHAlign, labelVAlign);
 }
@@ -37,12 +48,12 @@ void IconButton::recalcSize() {
 	uint h = 0, w = 0;
 	uint margin = labelMargin;
 
-	if (gmenu2x->sc[icon] == NULL || label == "")
+	if (iconSurface == NULL || label == "")
 		margin = 0;
 
-	if (gmenu2x->sc[icon] != NULL) {
-		w += gmenu2x->sc[icon]->raw->w;
-		h += gmenu2x->sc[icon]->raw->h;
+	if (iconSurface != NULL) {
+		w += iconSurface->width();
+		h += iconSurface->height();
 		iconRect.w = w;
 		iconRect.h = h;
 		iconRect.x = rect.x;
@@ -60,13 +71,13 @@ void IconButton::recalcSize() {
 		if (labelPosition == IconButton::DISP_LEFT || labelPosition == IconButton::DISP_RIGHT) {
 			w += margin + labelRect.w;
 			//if (labelRect.h > h) h = labelRect.h;
-			labelHAlign = SFontHAlignLeft;
-			labelVAlign = SFontVAlignMiddle;
+			labelHAlign = ASFont::HAlignLeft;
+			labelVAlign = ASFont::VAlignMiddle;
 		} else {
 			h += margin + labelRect.h;
 			//if (labelRect.w > w) w = labelRect.w;
-			labelHAlign = SFontHAlignCenter;
-			labelVAlign = SFontVAlignTop;
+			labelHAlign = ASFont::HAlignCenter;
+			labelVAlign = ASFont::VAlignTop;
 		}
 
 		switch (labelPosition) {
@@ -93,11 +104,11 @@ void IconButton::recalcSize() {
 	setSize(w, h);
 }
 
-string IconButton::getLabel() {
+const string &IconButton::getLabel() {
 	return label;
 }
 
-void IconButton::setLabel(string label) {
+void IconButton::setLabel(const string &label) {
 	this->label = label;
 }
 
@@ -107,13 +118,13 @@ void IconButton::setLabelPosition(int pos, int margin) {
 	recalcSize();
 }
 
-string IconButton::getIcon() {
+const string &IconButton::getIcon() {
 	return icon;
 }
 
-void IconButton::setIcon(string icon) {
+void IconButton::setIcon(const string &icon) {
 	this->icon = icon;
-	recalcSize();
+	updateSurfaces();
 }
 
 void IconButton::setAction(ButtonAction action) {

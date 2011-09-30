@@ -21,36 +21,34 @@
 #include "imagedialog.h"
 #include "utilities.h"
 
-using namespace std;
+using std::string;
 
-MenuSettingImage::MenuSettingImage(GMenu2X *gmenu2x, string name, string description, string *value, string filter)
-	: MenuSettingFile(gmenu2x,name,description,value,filter) {
-	this->gmenu2x = gmenu2x;
-	this->filter = filter;
-	_value = value;
-	originalValue = *value;
+MenuSettingImage::MenuSettingImage(GMenu2X *gmenu2x, const string &name, const string &description, string *value, const string &filter)
+	: MenuSettingFile(gmenu2x, name, description, value, filter)
+{
 }
 
-void MenuSettingImage::manageInput() {
-	if ( gmenu2x->input[ACTION_X] ) setValue("");
-	if ( gmenu2x->input[ACTION_B] ) {
-		ImageDialog id(gmenu2x, description, filter, value());
-		if (id.exec()) setValue( id.path()+"/"+id.file );
-	}
+void MenuSettingImage::edit() {
+	ImageDialog id(gmenu2x, description, filter, value());
+	if (id.exec()) setValue(id.getPath() + "/" + id.getFile());
 }
 
-void MenuSettingImage::setValue(string value) {
-	string skinpath = gmenu2x->getExePath()+"skins/"+gmenu2x->confStr["skin"];
-	bool inSkinDir = value.substr(0,skinpath.length()) == skinpath;
+void MenuSettingImage::setValue(const string &value) {
+	string skinpath(gmenu2x->getExePath() + "skins/" + gmenu2x->confStr["skin"]);
+	bool inSkinDir = value.substr(0, skinpath.length()) == skinpath;
 	if (!inSkinDir && gmenu2x->confStr["skin"] != "Default") {
-		skinpath = gmenu2x->getExePath()+"skins/Default";
-		inSkinDir = value.substr(0,skinpath.length()) == skinpath;
+		skinpath = gmenu2x->getExePath() + "skins/Default";
+		inSkinDir = value.substr(0, skinpath.length()) == skinpath;
 	}
 	if (inSkinDir) {
 		string tempIcon = value.substr(skinpath.length(), value.length());
 		string::size_type pos = tempIcon.find("/");
-		if (pos != string::npos)
-			value = "skin:"+tempIcon.substr(pos+1,value.length());
+		if (pos != string::npos) {
+			*_value = "skin:" + tempIcon.substr(pos + 1, value.length());
+		} else {
+			*_value = value;
+		}
+	} else {
+		*_value = value;
 	}
-	*_value = value;
 }

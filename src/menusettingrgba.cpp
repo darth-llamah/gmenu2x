@@ -18,15 +18,22 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 #include "menusettingrgba.h"
+#include "gmenu2x.h"
+
 #include <sstream>
 
-using namespace std;
-using namespace fastdelegate;
+using std::string;
+using std::stringstream;
+using fastdelegate::MakeDelegate;
 
-MenuSettingRGBA::MenuSettingRGBA(GMenu2X *gmenu2x, string name, string description, RGBAColor *value)
-	: MenuSetting(gmenu2x,name,description) {
+MenuSettingRGBA::MenuSettingRGBA(
+		GMenu2X *gmenu2x, const string &name,
+		const string &description, RGBAColor *value)
+	: MenuSetting(gmenu2x,name,description)
+{
+	edit = false;
+
 	selPart = 0;
-	this->gmenu2x = gmenu2x;
 	_value = value;
 	originalValue = *value;
 	this->setR(this->value().r);
@@ -34,17 +41,7 @@ MenuSettingRGBA::MenuSettingRGBA(GMenu2X *gmenu2x, string name, string descripti
 	this->setB(this->value().b);
 	this->setA(this->value().a);
 
-	btnDec = new IconButton(gmenu2x, "skin:imgs/buttons/x.png", gmenu2x->tr["Decrease"]);
-	btnDec->setAction(MakeDelegate(this, &MenuSettingRGBA::dec));
-
-	btnInc = new IconButton(gmenu2x, "skin:imgs/buttons/y.png", gmenu2x->tr["Increase"]);
-	btnInc->setAction(MakeDelegate(this, &MenuSettingRGBA::inc));
-
-	btnLeftComponent = new IconButton(gmenu2x, "skin:imgs/buttons/left.png");
-	btnLeftComponent->setAction(MakeDelegate(this, &MenuSettingRGBA::leftComponent));
-
-	btnRightComponent = new IconButton(gmenu2x, "skin:imgs/buttons/right.png", gmenu2x->tr["Change color component"]);
-	btnRightComponent->setAction(MakeDelegate(this, &MenuSettingRGBA::rightComponent));
+	updateButtonBox();
 }
 
 void MenuSettingRGBA::draw(int y) {
@@ -52,78 +49,127 @@ void MenuSettingRGBA::draw(int y) {
 	MenuSetting::draw(y);
 	gmenu2x->s->rectangle( 153, y+1, 11, 11, 0,0,0,255 );
 	gmenu2x->s->box( 154, y+2, 9, 9, value() );
-	gmenu2x->s->write( gmenu2x->font, "R: "+strR, 169, y+gmenu2x->font->getHalfHeight(), SFontHAlignLeft, SFontVAlignMiddle );
-	gmenu2x->s->write( gmenu2x->font, "G: "+strG, 205, y+gmenu2x->font->getHalfHeight(), SFontHAlignLeft, SFontVAlignMiddle );
-	gmenu2x->s->write( gmenu2x->font, "B: "+strB, 241, y+gmenu2x->font->getHalfHeight(), SFontHAlignLeft, SFontVAlignMiddle );
-	gmenu2x->s->write( gmenu2x->font, "A: "+strA, 277, y+gmenu2x->font->getHalfHeight(), SFontHAlignLeft, SFontVAlignMiddle );
+	gmenu2x->s->write( gmenu2x->font, "R: "+strR, 169, y, ASFont::HAlignLeft, ASFont::VAlignTop );
+	gmenu2x->s->write( gmenu2x->font, "G: "+strG, 205, y, ASFont::HAlignLeft, ASFont::VAlignTop );
+	gmenu2x->s->write( gmenu2x->font, "B: "+strB, 241, y, ASFont::HAlignLeft, ASFont::VAlignTop );
+	gmenu2x->s->write( gmenu2x->font, "A: "+strA, 277, y, ASFont::HAlignLeft, ASFont::VAlignTop );
 }
 
 void MenuSettingRGBA::handleTS() {
-	if (gmenu2x->ts.pressed())
-		for (int i=0; i<4; i++)
+	if (gmenu2x->ts.pressed()) {
+		for (int i=0; i<4; i++) {
 			if (i!=selPart && gmenu2x->ts.inRect(166+i*36,y,36,14)) {
 				selPart = i;
 				i = 4;
 			}
+		}
+	}
 
-	btnDec->handleTS();
-	btnInc->handleTS();
-	btnLeftComponent->handleTS();
-	btnRightComponent->handleTS();
+	MenuSetting::handleTS();
 }
 
-void MenuSettingRGBA::manageInput() {
-	if ( gmenu2x->input[ACTION_Y    ]) inc();
-	if ( gmenu2x->input[ACTION_X    ]) dec();
-	if ( gmenu2x->input[ACTION_LEFT ]) leftComponent();
-	if ( gmenu2x->input[ACTION_RIGHT]) rightComponent();
+bool MenuSettingRGBA::manageInput(bevent_t *event) {
+	if (edit) {
+	switch(event->button) {
+		case LEFT:
+			dec();
+			break;
+		case RIGHT:
+			inc();
+			break;
+		case ALTLEFT:
+			update_value(-10);
+			break;
+		case ALTRIGHT:
+			update_value(10);
+			break;
+		case ACCEPT:
+		case UP:
+		case DOWN:
+			edit = false;
+			updateButtonBox();
+			break;
+		default:
+			return false;
+	}
+	} else {
+		switch(event->button) {
+			case LEFT:
+				leftComponent();
+				break;
+			case RIGHT:
+				rightComponent();
+				break;
+			case ACCEPT:
+				edit = true;
+				updateButtonBox();
+				break;
+			default:
+				return false;
+		}
+	}
+	return true;
 }
 
-void MenuSettingRGBA::dec() {
-	setSelPart( constrain(getSelPart()-1,0,255) );
+void MenuSettingRGBA::update_value(int value)
+{
+	setSelPart(constrain(getSelPart() + value, 0, 255));
 }
 
-void MenuSettingRGBA::inc() {
-	setSelPart( constrain(getSelPart()+1,0,255) );
+void MenuSettingRGBA::dec()
+{
+	update_value(-1);
 }
 
-void MenuSettingRGBA::leftComponent() {
+void MenuSettingRGBA::inc()
+{
+	update_value(+1);
+}
+
+void MenuSettingRGBA::leftComponent()
+{
 	selPart = constrain(selPart-1,0,3);
 }
 
-void MenuSettingRGBA::rightComponent() {
+void MenuSettingRGBA::rightComponent()
+{
 	selPart = constrain(selPart+1,0,3);
 }
 
-void MenuSettingRGBA::setR(unsigned short r) {
+void MenuSettingRGBA::setR(unsigned short r)
+{
 	_value->r = r;
 	stringstream ss;
 	ss << r;
 	ss >> strR;
 }
 
-void MenuSettingRGBA::setG(unsigned short g) {
+void MenuSettingRGBA::setG(unsigned short g)
+{
 	_value->g = g;
 	stringstream ss;
 	ss << g;
 	ss >> strG;
 }
 
-void MenuSettingRGBA::setB(unsigned short b) {
+void MenuSettingRGBA::setB(unsigned short b)
+{
 	_value->b = b;
 	stringstream ss;
 	ss << b;
 	ss >> strB;
 }
 
-void MenuSettingRGBA::setA(unsigned short a) {
+void MenuSettingRGBA::setA(unsigned short a)
+{
 	_value->a = a;
 	stringstream ss;
 	ss << a;
 	ss >> strA;
 }
 
-void MenuSettingRGBA::setSelPart(unsigned short value) {
+void MenuSettingRGBA::setSelPart(unsigned short value)
+{
 	switch (selPart) {
 		default: case 0: setR(value); break;
 		case 1: setG(value); break;
@@ -132,11 +178,13 @@ void MenuSettingRGBA::setSelPart(unsigned short value) {
 	}
 }
 
-RGBAColor MenuSettingRGBA::value() {
+RGBAColor MenuSettingRGBA::value()
+{
 	return *_value;
 }
 
-unsigned short MenuSettingRGBA::getSelPart() {
+unsigned short MenuSettingRGBA::getSelPart()
+{
 	switch (selPart) {
 		default: case 0: return value().r;
 		case 1: return value().g;
@@ -145,24 +193,42 @@ unsigned short MenuSettingRGBA::getSelPart() {
 	}
 }
 
-void MenuSettingRGBA::adjustInput() {
-#ifdef TARGET_GP2X
+void MenuSettingRGBA::adjustInput()
+{
+#ifdef PLATFORM_GP2X
+    /*
 	gmenu2x->input.setInterval(30, ACTION_Y );
 	gmenu2x->input.setInterval(30, ACTION_X );
 	gmenu2x->input.setInterval(30, ACTION_L );
+    */
 #endif
 }
 
-void MenuSettingRGBA::drawSelected(int y) {
+void MenuSettingRGBA::drawSelected(int y)
+{
 	int x = 166+selPart*36;
-	gmenu2x->s->box( x, y, 36, 14, gmenu2x->skinConfColors["selectionBg"] );
+	gmenu2x->s->box( x, y, 36, 14, gmenu2x->skinConfColors[COLOR_SELECTION_BG] );
 
-	gmenu2x->drawButton(btnDec,
-	gmenu2x->drawButton(btnInc,
-	gmenu2x->drawButton(btnRightComponent,
-	gmenu2x->drawButton(btnLeftComponent)-6)));
+	MenuSetting::drawSelected(y);
 }
 
-bool MenuSettingRGBA::edited() {
+bool MenuSettingRGBA::edited()
+{
 	return originalValue.r != value().r || originalValue.g != value().g || originalValue.b != value().b || originalValue.a != value().a;
+}
+
+void MenuSettingRGBA::updateButtonBox()
+{
+	buttonBox.clear();
+	if (edit) {
+		buttonBox.add(new IconButton(gmenu2x, "skin:imgs/buttons/l.png"));
+		buttonBox.add(new IconButton(gmenu2x, "skin:imgs/buttons/left.png", gmenu2x->tr["Decrease"]));
+		buttonBox.add(new IconButton(gmenu2x, "skin:imgs/buttons/r.png"));
+		buttonBox.add(new IconButton(gmenu2x, "skin:imgs/buttons/right.png", gmenu2x->tr["Increase"]));
+		buttonBox.add(new IconButton(gmenu2x, "skin:imgs/buttons/accept.png", gmenu2x->tr["Confirm"]));
+	} else {
+		buttonBox.add(new IconButton(gmenu2x, "skin:imgs/buttons/left.png"));
+		buttonBox.add(new IconButton(gmenu2x, "skin:imgs/buttons/right.png", gmenu2x->tr["Change color component"]));
+		buttonBox.add(new IconButton(gmenu2x, "skin:imgs/buttons/accept.png", gmenu2x->tr["Edit"]));
+	}
 }

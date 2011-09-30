@@ -20,34 +20,17 @@
 #ifndef MENUSETTINGDIR_H
 #define MENUSETTINGDIR_H
 
-#include "gmenu2x.h"
-#include "menusetting.h"
+#include "menusettingstringbase.h"
 
-using std::string;
-
-class MenuSettingDir : public MenuSetting {
-private:
-	string originalValue;
-	string *_value;
-	GMenu2X *gmenu2x;
-	IconButton *btnClear, *btnSelect;
-
-	void select();
-	void clear();
+class MenuSettingDir : public MenuSettingStringBase {
+protected:
+	virtual void edit();
 
 public:
-	MenuSettingDir(GMenu2X *gmenu2x, string name, string description, string *value);
-	virtual ~MenuSettingDir() {};
-
-	virtual void draw(int y);
-	virtual void handleTS();
-	virtual void manageInput();
-	virtual void adjustInput();
-	virtual void drawSelected(int y);
-	virtual bool edited();
-
-	void setValue(string value);
-	string value();
+	MenuSettingDir(
+			GMenu2X *gmenu2x, const std::string &name,
+			const std::string &description, std::string *value);
+	virtual ~MenuSettingDir() {}
 };
 
 #endif

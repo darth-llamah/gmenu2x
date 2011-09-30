@@ -20,13 +20,10 @@
 #ifndef MENUSETTING_H
 #define MENUSETTING_H
 
-#ifdef TARGET_GP2X
+#include "buttonbox.h"
 #include "inputmanager.h"
-#endif
 
-#include "gmenu2x.h"
-
-using std::string;
+#include <string>
 
 /**
 Base class for different kind of option
@@ -34,21 +31,28 @@ Base class for different kind of option
 	@author Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
 */
 class MenuSetting {
-private:
+protected:
 	GMenu2X *gmenu2x;
 
+	ButtonBox buttonBox;
+
+	std::string name, description;
+
 public:
-	MenuSetting(GMenu2X *gmenu2x, string name, string description);
-	virtual ~MenuSetting() {};
+	MenuSetting(
+			GMenu2X *gmenu2x, const std::string &name,
+			const std::string &description);
+	virtual ~MenuSetting();
 
 	virtual void draw(int y);
 	virtual void handleTS();
-	virtual void manageInput();
+
+	virtual bool manageInput(bevent_t *event) = 0;
 	virtual void adjustInput();
 	virtual void drawSelected(int y);
-	virtual bool edited();
+	virtual bool edited() = 0;
 
-	string name, description;
+	const std::string &getDescription() { return description; }
 };
 
 #endif

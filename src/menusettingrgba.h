@@ -20,34 +20,38 @@
 #ifndef MENUSETTINGRGBA_H
 #define MENUSETTINGRGBA_H
 
-#include "gmenu2x.h"
 #include "menusetting.h"
-#include "utilities.h"
+#include "surface.h"
+#include "inputmanager.h"
 
-using std::string;
+class GMenu2X;
 
 class MenuSettingRGBA : public MenuSetting {
 private:
 	unsigned short selPart;
 	int y;
-	string strR, strG, strB, strA;
+	std::string strR, strG, strB, strA;
 	RGBAColor originalValue;
 	RGBAColor *_value;
-	GMenu2X *gmenu2x;
-	IconButton *btnDec, *btnInc, *btnLeftComponent, *btnRightComponent;
 
+	void update_value(int value);
 	void dec();
 	void inc();
 	void leftComponent();
 	void rightComponent();
 
+	bool edit;
+	void updateButtonBox();
+
 public:
-	MenuSettingRGBA(GMenu2X *gmenu2x, string name, string description, RGBAColor *value);
+	MenuSettingRGBA(
+			GMenu2X *gmenu2x, const std::string &name,
+			const std::string &description, RGBAColor *value);
 	virtual ~MenuSettingRGBA() {};
 
 	virtual void draw(int y);
 	virtual void handleTS();
-	virtual void manageInput();
+	virtual bool manageInput(bevent_t *event);
 	virtual void adjustInput();
 	virtual void drawSelected(int y);
 	virtual bool edited();

@@ -39,24 +39,31 @@
 
 #include <string>
 #include "gmenu2x.h"
+#include "dialog.h"
+#include "buttonbox.h"
 
 using std::string;
 using std::vector;
 
 typedef vector<string> stringlist;
 
-class InputDialog {
+class InputManager;
+class Touchscreen;
+
+class InputDialog : protected Dialog {
 private:
+	InputManager &inputMgr;
+	Touchscreen &ts;
 	int selRow, selCol;
 	bool close, ok;
 	string title, text, icon;
-	GMenu2X *gmenu2x;
 	short curKeyboard;
 	vector<stringlist> keyboard;
 	stringlist *kb;
 	int kbLength, kbWidth, kbHeight, kbLeft;
 	SDL_Rect kbRect;
-	IconButton *btnBackspaceX, *btnBackspaceL, *btnSpace, *btnConfirm, *btnChangeKeys;
+	ButtonBox *buttonbox;
+	string input;
 
 	void backspace();
 	void space();
@@ -67,10 +74,10 @@ private:
 	void setKeyboard(int);
 
 public:
-	InputDialog(GMenu2X *gmenu2x, string text, string startvalue="", string title="", string icon="");
+	InputDialog(GMenu2X *gmenu2x, InputManager &inputMgr, Touchscreen &ts, const string &text, const string &startvalue="", const string &title="", const string &icon="");
 
-	string input;
 	bool exec();
+	const string &getInput() { return input; }
 };
 
 #endif /*INPUTDIALOG_H_*/

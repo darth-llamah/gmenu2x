@@ -24,13 +24,14 @@
 #include <dirent.h>
 #include <algorithm>
 #include <math.h>
+#include <fstream>
 
 #include "gmenu2x.h"
 #include "linkapp.h"
 #include "menu.h"
 #include "filelister.h"
 #include "utilities.h"
-#include "pxml.h"
+#include "debug.h"
 
 using namespace std;
 
@@ -38,26 +39,9 @@ Menu::Menu(GMenu2X *gmenu2x) {
 	this->gmenu2x = gmenu2x;
 	iFirstDispSection = 0;
 
-	DIR *dirp;
-	struct stat st;
-	struct dirent *dptr;
-	string filepath;
+	readSections(GMENU2X_SYSTEM_DIR "/sections");
+	readSections(GMenu2X::getHome() + "/sections");
 
-	if ((dirp = opendir("sections")) == NULL) return;
-
-	while ((dptr = readdir(dirp))) {
-		if (dptr->d_name[0]=='.') continue;
-		filepath = (string)"sections/"+dptr->d_name;
-		int statRet = stat(filepath.c_str(), &st);
-		if (!S_ISDIR(st.st_mode)) continue;
-		if (statRet != -1) {
-			sections.push_back((string)dptr->d_name);
-			linklist ll;
-			links.push_back(ll);
-		}
-	}
-
-	closedir(dirp);
 	sort(sections.begin(),sections.end(),case_less());
 	setSectionIndex(0);
 	readLinks();
@@ -69,6 +53,34 @@ Menu::~Menu() {
 
 uint Menu::firstDispRow() {
 	return iFirstDispRow;
+}
+
+void Menu::readSections(std::string parentDir)
+{
+	DIR *dirp;
+	struct stat st;
+	struct dirent *dptr;
+
+	dirp = opendir(parentDir.c_str());
+	if (!dirp) return;
+
+	while ((dptr = readdir(dirp))) {
+		int statret;
+		if (dptr->d_name[0]=='.') continue;
+
+		string filepath = parentDir + "/" + dptr->d_name;
+		statret = stat(filepath.c_str(), &st);
+		if (!S_ISDIR(st.st_mode)) continue;
+		if (statret != -1) {
+			if (find(sections.begin(), sections.end(), (string)dptr->d_name) == sections.end()) {
+				sections.push_back((string)dptr->d_name);
+				linklist ll;
+				links.push_back(ll);
+			}
+		}
+	}
+
+	closedir(dirp);
 }
 
 void Menu::loadIcons() {
@@ -104,7 +116,7 @@ void Menu::loadIcons() {
 void Menu::freeLinks() {
 	for (vector<linklist>::iterator section = links.begin(); section<links.end(); section++)
 		for (linklist::iterator link = section->begin(); link<section->end(); link++)
-			free(*link);
+			delete *link;
 }
 
 linklist *Menu::sectionLinks(int i) {
@@ -133,7 +145,7 @@ int Menu::selSectionIndex() {
 	return iSection;
 }
 
-string Menu::selSection() {
+const string &Menu::selSection() {
 	return sections[iSection];
 }
 
@@ -144,8 +156,8 @@ void Menu::setSectionIndex(int i) {
 		i=0;
 	iSection = i;
 
-	if (i>(int)iFirstDispSection+4)
-		iFirstDispSection = i-4;
+	if (i>(int)iFirstDispSection+2)
+		iFirstDispSection = i-2;
 	else if (i<(int)iFirstDispSection)
 		iFirstDispSection = i;
 
@@ -153,15 +165,10 @@ void Menu::setSectionIndex(int i) {
 	iFirstDispRow = 0;
 }
 
-string Menu::sectionPath(int section) {
-	if (section<0 || section>(int)sections.size()) section = iSection;
-	return "sections/"+sections[section]+"/";
-}
-
 /*====================================
    LINKS MANAGEMENT
   ====================================*/
-bool Menu::addActionLink(uint section, string title, LinkRunAction action, string description, string icon) {
+bool Menu::addActionLink(uint section, const string &title, LinkRunAction action, const string &description, const string &icon) {
 	if (section>=sections.size()) return false;
 
 	LinkAction *linkact = new LinkAction(gmenu2x,action);
@@ -183,10 +190,9 @@ bool Menu::addLink(string path, string file, string section) {
 		if (!addSection(section))
 			return false;
 	}
-	if (path[path.length()-1]!='/') path += "/";
 
-	//if the extension is not equal to gpu or dge then enable the wrapepr by default
-	bool wrapper = false, pxml = false;
+	//if the extension is not equal to gpu or dge then enable the wrapper by default
+	bool wrapper = false;
 
 	//strip the extension from the filename
 	string title = file;
@@ -195,24 +201,31 @@ bool Menu::addLink(string path, string file, string section) {
 		string ext = title.substr(pos, title.length());
 		transform(ext.begin(), ext.end(), ext.begin(), (int(*)(int)) tolower);
 		if (ext == ".gpu" || ext == ".dge") wrapper = false;
-		else if (ext == ".pxml") pxml = true;
 		title = title.substr(0, pos);
 	}
 
-	string linkpath = "sections/"+section+"/"+title;
+	string linkpath = GMenu2X::getHome() + "/sections";
+	if (!fileExists(linkpath))
+		mkdir(linkpath.c_str(), 0755);
+
+	linkpath = GMenu2X::getHome() + "/sections/" + section;
+	if (!fileExists(linkpath))
+		mkdir(linkpath.c_str(), 0755);
+
+	linkpath += "/" + title;
 	int x=2;
 	while (fileExists(linkpath)) {
 		stringstream ss;
 		linkpath = "";
 		ss << x;
 		ss >> linkpath;
-		linkpath = "sections/"+section+"/"+title+linkpath;
+		linkpath = GMenu2X::getHome()+"/sections/"+section+"/"+title+linkpath;
 		x++;
 	}
-#ifdef DEBUG
-	cout << "\033[0;34mGMENU2X:\033[0m Adding link: " << linkpath << endl;
-#endif
 
+	INFO("Adding link: '%s'\n", linkpath.c_str());
+
+	if (path[path.length()-1]!='/') path += "/";
 	//search for a manual
 	pos = file.rfind(".");
 	string exename = path+file.substr(0,pos);
@@ -238,37 +251,15 @@ bool Menu::addLink(string path, string file, string section) {
 
 			if (lcfilename.find("readme") != string::npos) {
 				found = true;
-				manual = path+fl.files[x];
+				manual = path+fl.getFiles()[x];
 			}
 		}
 	}
-#ifdef DEBUG
-	cout << "\033[0;34mGMENU2X:\033[0m Manual: " << manual << endl;
-#endif
 
-	// Read pxml
-	string shorttitle="", description="", exec="", icon="";
-	if (pxml) {
-		PXml pxmlDoc(path+file);
-		if (pxmlDoc.isValid()) {
-			shorttitle = pxmlDoc.getTitle();
-			description = pxmlDoc.getDescription();
-			exec = pxmlDoc.getExec();
-			if (!exec.empty() && exec[0]!='/')
-				exec = path+exec;
-			icon = pxmlDoc.getIcon();
-			if (!icon.empty() && icon[0]!='/')
-				icon = path+icon;
-		} else {
-#ifdef DEBUG
-			cout << "\033[0;34mGMENU2X:\033[0m Error loading pxml " << file << ": " << pxmlDoc.getError() << endl;
-#endif
-			return false;
-		}
-	} else {
-		shorttitle = title;
-		exec = path+file;
-	}
+	INFO("Manual: '%s'\n", manual.c_str());
+
+	string shorttitle=title, description="", exec=path+file, icon="";
+	if (fileExists(exename+".png")) icon = exename+".png";
 
 	//Reduce title lenght to fit the link width
 	if (gmenu2x->font->getTextWidth(shorttitle)>gmenu2x->skinConfInt["linkWidth"]) {
@@ -289,26 +280,30 @@ bool Menu::addLink(string path, string file, string section) {
  		sync();
 		int isection = find(sections.begin(),sections.end(),section) - sections.begin();
 		if (isection>=0 && isection<(int)sections.size()) {
-#ifdef DEBUG
-			cout << "\033[0;34mGMENU2X:\033[0m Section: " << sections[isection] << "(" << isection << ")" << endl;
-#endif
-			LinkApp* link = new LinkApp(gmenu2x, linkpath.c_str());
+
+			INFO("Section: '%s(%i)'\n", sections[isection].c_str(), isection);
+
+			LinkApp* link = new LinkApp(gmenu2x, gmenu2x->input, linkpath.c_str());
 			link->setSize(gmenu2x->skinConfInt["linkWidth"],gmenu2x->skinConfInt["linkHeight"]);
 			links[isection].push_back( link );
 		}
 	} else {
-#ifdef DEBUG
-		cout << "\033[0;34mGMENU2X:\033[0;31m Error while opening the file '" << linkpath << "' for write\033[0m" << endl;
-#endif
+
+		ERROR("Error while opening the file '%s' for write.\n", linkpath.c_str());
+
 		return false;
 	}
 
 	return true;
 }
 
-bool Menu::addSection(string sectionName) {
-	string sectiondir = "sections/"+sectionName;
-	if (mkdir(sectiondir.c_str(),0777)==0) {
+bool Menu::addSection(const string &sectionName) {
+	string sectiondir = GMenu2X::getHome() + "/sections";
+	if (!fileExists(sectiondir))
+		mkdir(sectiondir.c_str(), 0755);
+
+	sectiondir = sectiondir + "/" + sectionName;
+	if (mkdir(sectiondir.c_str(), 0755) == 0) {
 		sections.push_back(sectionName);
 		linklist ll;
 		links.push_back(ll);
@@ -317,21 +312,31 @@ bool Menu::addSection(string sectionName) {
 	return false;
 }
 
-void Menu::deleteSelectedLink() {
-#ifdef DEBUG
-	cout << "\033[0;34mGMENU2X:\033[0m Deleting link " << selLink()->getTitle() << endl;
-#endif
+void Menu::deleteSelectedLink()
+{
+	bool icon_used = false;
+	string iconpath = selLink()->getIconPath();
+
+	INFO("Deleting link '%s'\n", selLink()->getTitle().c_str());
+
 	if (selLinkApp()!=NULL)
-		unlink(selLinkApp()->file.c_str());
-	gmenu2x->sc.del(selLink()->getIconPath());
+		unlink(selLinkApp()->getFile().c_str());
 	sectionLinks()->erase( sectionLinks()->begin() + selLinkIndex() );
 	setLinkIndex(selLinkIndex());
+
+	for (vector<linklist>::iterator section = links.begin();
+				!icon_used && section<links.end(); section++)
+		for (linklist::iterator link = section->begin();
+					!icon_used && link<section->end(); link++)
+			icon_used = !iconpath.compare((*link)->getIconPath());
+
+	if (!icon_used)
+	  gmenu2x->sc.del(iconpath);
 }
 
 void Menu::deleteSelectedSection() {
-#ifdef DEBUG
-	cout << "\033[0;34mGMENU2X:\033[0m Deleting section " << selSection() << endl;
-#endif
+	INFO("Deleting section '%s'\n", selSection().c_str());
+
 	gmenu2x->sc.del("sections/"+selSection()+".png");
 	links.erase( links.begin()+selSectionIndex() );
 	sections.erase( sections.begin()+selSectionIndex() );
@@ -364,10 +369,13 @@ void Menu::linkRight() {
 		setLinkIndex(iLink+1);
 }
 
+#define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
+
 void Menu::linkUp() {
 	int l = iLink-gmenu2x->linkColumns;
 	if (l<0) {
-		uint rows = (uint)ceil(sectionLinks()->size()/(double)gmenu2x->linkColumns);
+		unsigned int rows;
+		rows = DIV_ROUND_UP(sectionLinks()->size(), gmenu2x->linkColumns);
 		l = (rows*gmenu2x->linkColumns)+l;
 		if (l >= (int)sectionLinks()->size())
 			l -= gmenu2x->linkColumns;
@@ -378,8 +386,9 @@ void Menu::linkUp() {
 void Menu::linkDown() {
 	uint l = iLink+gmenu2x->linkColumns;
 	if (l >= sectionLinks()->size()) {
-		uint rows = (uint)ceil(sectionLinks()->size()/(double)gmenu2x->linkColumns);
-		uint curCol = (uint)ceil((iLink+1)/(double)gmenu2x->linkColumns);
+		unsigned int rows, curCol;
+		rows = DIV_ROUND_UP(sectionLinks()->size(), gmenu2x->linkColumns);
+		curCol = DIV_ROUND_UP(iLink + 1, gmenu2x->linkColumns);
 		if (rows > curCol)
 			l = sectionLinks()->size()-1;
 		else
@@ -415,43 +424,57 @@ void Menu::setLinkIndex(int i) {
 	iLink = i;
 }
 
+void Menu::readLinksOfSection(std::string path, std::vector<std::string> &linkfiles)
+{
+	DIR *dirp;
+	struct stat st;
+	struct dirent *dptr;
+
+	if ((dirp = opendir(path.c_str())) == NULL) return;
+
+	while ((dptr = readdir(dirp))) {
+		if (dptr->d_name[0] == '.') continue;
+		string filepath = path + "/" + dptr->d_name;
+		int statret = stat(filepath.c_str(), &st);
+		if (S_ISDIR(st.st_mode)) continue;
+		if (statret != -1)
+			linkfiles.push_back(filepath);
+	}
+
+	closedir(dirp);
+}
+
 void Menu::readLinks() {
 	vector<string> linkfiles;
 
 	iLink = 0;
 	iFirstDispRow = 0;
-
-	DIR *dirp;
-	struct stat st;
-	struct dirent *dptr;
 	string filepath;
 
 	for (uint i=0; i<links.size(); i++) {
 		links[i].clear();
 		linkfiles.clear();
 
-		if ((dirp = opendir(sectionPath(i).c_str())) == NULL) continue;
+		int correct = (i>sections.size() ? iSection : i);
 
-		while ((dptr = readdir(dirp))) {
-			if (dptr->d_name[0]=='.') continue;
-			filepath = sectionPath(i)+dptr->d_name;
-			int statRet = stat(filepath.c_str(), &st);
-			if (S_ISDIR(st.st_mode)) continue;
-			if (statRet != -1) {
-				linkfiles.push_back(filepath);
-			}
-		}
+		readLinksOfSection(GMENU2X_SYSTEM_DIR "/sections/"
+		  + sections[correct], linkfiles);
+
+		readLinksOfSection(GMenu2X::getHome() + "/sections/"
+		  + sections[correct], linkfiles);
 
 		sort(linkfiles.begin(), linkfiles.end(),case_less());
 		for (uint x=0; x<linkfiles.size(); x++) {
-			LinkApp *link = new LinkApp(gmenu2x, linkfiles[x].c_str());
+			LinkApp *link = new LinkApp(gmenu2x, gmenu2x->input, linkfiles[x].c_str());
 			link->setSize(gmenu2x->skinConfInt["linkWidth"],gmenu2x->skinConfInt["linkHeight"]);
 			if (link->targetExists())
 				links[i].push_back( link );
 			else
-				free(link);
+				delete link;
 		}
-
-		closedir(dirp);
 	}
+}
+
+void Menu::renameSection(int index, const string &name) {
+	sections[index] = name;
 }

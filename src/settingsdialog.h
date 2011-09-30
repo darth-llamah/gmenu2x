@@ -29,18 +29,23 @@
 #include <string>
 #include "gmenu2x.h"
 #include "menusetting.h"
+#include "dialog.h"
 
 using std::string;
 using std::vector;
 
-class SettingsDialog {
+class InputManager;
+class Touchscreen;
+
+class SettingsDialog : protected Dialog {
 private:
+	InputManager &inputMgr;
+	Touchscreen &ts;
 	vector<MenuSetting *> voices;
 	string text, icon;
-	GMenu2X *gmenu2x;
 
 public:
-	SettingsDialog(GMenu2X *gmenu2x, string text, string icon="skin:sections/settings.png");
+	SettingsDialog(GMenu2X *gmenu2x, InputManager &inputMgr, Touchscreen &ts, const string &text, const string &icon="skin:sections/settings.png");
 	~SettingsDialog();
 
 	bool edited();

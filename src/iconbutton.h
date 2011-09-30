@@ -1,20 +1,29 @@
 #ifndef ICONBUTTON_H
 #define ICONBUTTON_H
 
-#include <string>
 #include "button.h"
+#include "asfont.h"
+
+#include <string>
 
 using std::string;
 
 class GMenu2X;
+class Surface;
 
 class IconButton : public Button {
 protected:
+	GMenu2X *gmenu2x;
 	string icon, label;
 	int labelPosition, labelMargin;
-	unsigned short labelHAlign, labelVAlign;
+	ASFont::HAlign labelHAlign;
+	ASFont::VAlign labelVAlign;
 	void recalcSize();
 	SDL_Rect iconRect, labelRect;
+
+	Surface *iconSurface;
+
+	void updateSurfaces();
 
 public:
 	static const int DISP_RIGHT = 0;
@@ -22,20 +31,20 @@ public:
 	static const int DISP_TOP = 2;
 	static const int DISP_BOTTOM = 3;
 
-	IconButton(GMenu2X *gmenu2x, string icon, string label="");
+	IconButton(GMenu2X *gmenu2x, const string &icon, const string &label="");
 	virtual ~IconButton() {};
 
 	virtual void paint();
 	virtual bool paintHover();
 
-	void setPosition(int x, int y);
+	virtual void setPosition(int x, int y);
 
-	string getLabel();
-	void setLabel(string label);
+	const string &getLabel();
+	void setLabel(const string &label);
 	void setLabelPosition(int pos, int margin);
 
-	string getIcon();
-	void setIcon(string icon);
+	const string &getIcon();
+	void setIcon(const string &icon);
 
 	void setAction(ButtonAction action);
 };

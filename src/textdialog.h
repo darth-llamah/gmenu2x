@@ -23,21 +23,21 @@
 
 #include <string>
 #include "gmenu2x.h"
+#include "dialog.h"
 
 using std::string;
 using std::vector;
 
-class TextDialog {
+class TextDialog : protected Dialog {
 protected:
 	vector<string> *text;
 	string title, description, icon;
-	GMenu2X *gmenu2x;
 
 	void preProcess();
 	void drawText(vector<string> *text, uint firstRow, uint rowsPerPage);
 
 public:
-	TextDialog(GMenu2X *gmenu2x, string title, string description, string icon, vector<string> *text);
+	TextDialog(GMenu2X *gmenu2x, const string &title, const string &description, const string &icon, vector<string> *text);
 	void exec();
 };
 

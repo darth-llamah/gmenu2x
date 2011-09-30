@@ -22,8 +22,9 @@
 
 using namespace std;
 
-TextDialog::TextDialog(GMenu2X *gmenu2x, string title, string description, string icon, vector<string> *text) {
-	this->gmenu2x = gmenu2x;
+TextDialog::TextDialog(GMenu2X *gmenu2x, const string &title, const string &description, const string &icon, vector<string> *text)
+	: Dialog(gmenu2x)
+{
 	this->text = text;
 	this->title = title;
 	this->description = description;
@@ -99,15 +100,18 @@ void TextDialog::exec() {
 
 	//link icon
 	if (!fileExists(icon))
-		gmenu2x->drawTitleIcon("icons/ebook.png",true,&bg);
+		drawTitleIcon("icons/ebook.png",true,&bg);
 	else
-		gmenu2x->drawTitleIcon(icon,false,&bg);
-	gmenu2x->writeTitle(title,&bg);
-	gmenu2x->writeSubTitle(description,&bg);
+		drawTitleIcon(icon,false,&bg);
+	writeTitle(title,&bg);
+	writeSubTitle(description,&bg);
 
-	gmenu2x->drawButton(&bg, "x", gmenu2x->tr["Exit"],
+	gmenu2x->drawButton(&bg, "start", gmenu2x->tr["Exit"],
+	gmenu2x->drawButton(&bg, "cancel", "",
 	gmenu2x->drawButton(&bg, "down", gmenu2x->tr["Scroll"],
-	gmenu2x->drawButton(&bg, "up", "", 5)-10));
+	gmenu2x->drawButton(&bg, "up", "", 5)-10))-10);
+
+	bg.convertToDisplayFormat();
 
 	uint firstRow = 0, rowsPerPage = (gmenu2x->resY-60)/gmenu2x->font->getHeight();
 	while (!close) {
@@ -115,7 +119,30 @@ void TextDialog::exec() {
 		drawText(text, firstRow, rowsPerPage);
 		gmenu2x->s->flip();
 
+        switch(gmenu2x->input.waitForPressedButton()) {
+            case UP:
+                if (firstRow > 0) firstRow--;
+                break;
+            case DOWN:
+                if (firstRow + rowsPerPage < text->size()) firstRow++;
+                break;
+            case ALTLEFT:
+                if (firstRow >= rowsPerPage-1) firstRow -= rowsPerPage-1;
+                else firstRow = 0;
+                break;
+            case ALTRIGHT:
+                if (firstRow + rowsPerPage*2 -1 < text->size()) firstRow += rowsPerPage-1;
+                else firstRow = max(0, text->size() - rowsPerPage);
+                break;
+            case SETTINGS:
+            case CANCEL:
+                close = true;
+                break;
+            default:
+                break;
+        }
 
+        /*
 		gmenu2x->input.update();
 		if ( gmenu2x->input[ACTION_UP  ] && firstRow>0 ) firstRow--;
 		if ( gmenu2x->input[ACTION_DOWN] && firstRow+rowsPerPage<text->size() ) firstRow++;
@@ -132,5 +159,6 @@ void TextDialog::exec() {
 				firstRow = max(0,text->size()-rowsPerPage);
 		}
 		if ( gmenu2x->input[ACTION_START] || gmenu2x->input[ACTION_X] ) close = true;
+        */
 	}
 }

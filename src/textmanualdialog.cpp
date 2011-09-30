@@ -23,9 +23,8 @@
 
 using namespace std;
 
-TextManualDialog::TextManualDialog(GMenu2X *gmenu2x, string title, string icon, vector<string> *text)
+TextManualDialog::TextManualDialog(GMenu2X *gmenu2x, const string &title, const string &icon, vector<string> *text)
 	: TextDialog(gmenu2x,title,"",icon,text) {
-	this->gmenu2x = gmenu2x;
 
 	//split the text in multiple pages
 	for (uint i=0; i<text->size(); i++) {
@@ -70,16 +69,19 @@ void TextManualDialog::exec() {
 
 	//link icon
 	if (!fileExists(icon))
-		gmenu2x->drawTitleIcon("icons/ebook.png",true,&bg);
+		drawTitleIcon("icons/ebook.png",true,&bg);
 	else
-		gmenu2x->drawTitleIcon(icon,false,&bg);
-	gmenu2x->writeTitle(title+(description.empty() ? "" : ": "+description),&bg);
+		drawTitleIcon(icon,false,&bg);
+	writeTitle(title+(description.empty() ? "" : ": "+description),&bg);
 
-	gmenu2x->drawButton(&bg, "x", gmenu2x->tr["Exit"],
+	gmenu2x->drawButton(&bg, "start", gmenu2x->tr["Exit"],
+	gmenu2x->drawButton(&bg, "cancel", "",
 	gmenu2x->drawButton(&bg, "right", gmenu2x->tr["Change page"],
 	gmenu2x->drawButton(&bg, "left", "",
 	gmenu2x->drawButton(&bg, "down", gmenu2x->tr["Scroll"],
-	gmenu2x->drawButton(&bg, "up", "", 5)-10))-10));
+	gmenu2x->drawButton(&bg, "up", "", 5)-10))-10))-10);
+
+	bg.convertToDisplayFormat();
 
 	uint firstRow = 0, rowsPerPage = 180/gmenu2x->font->getHeight();
 	stringstream ss;
@@ -87,19 +89,56 @@ void TextManualDialog::exec() {
 	string spagecount;
 	ss >> spagecount;
 	string pageStatus;
+    
 	while (!close) {
 		bg.blit(gmenu2x->s,0,0);
-		gmenu2x->writeSubTitle(pages[page].title);
+		writeSubTitle(pages[page].title);
 		drawText(&pages[page].text, firstRow, rowsPerPage);
 
 		ss.clear();
 		ss << page+1;
 		ss >> pageStatus;
 		pageStatus = gmenu2x->tr["Page"]+": "+pageStatus+"/"+spagecount;
-		gmenu2x->s->write(gmenu2x->font, pageStatus, 310, 230, SFontHAlignRight, SFontVAlignMiddle);
+		gmenu2x->s->write(gmenu2x->font, pageStatus, 310, 230, ASFont::HAlignRight, ASFont::VAlignMiddle);
 
 		gmenu2x->s->flip();
 
+        switch(gmenu2x->input.waitForPressedButton()) {
+            case UP:
+                if (firstRow > 0) firstRow--;
+                break;
+            case DOWN:
+                if (firstRow + rowsPerPage < pages[page].text.size()) firstRow++;
+                break;
+            case LEFT:
+                if (page > 0) {
+                    page--;
+                    firstRow = 0;
+                }
+                break;
+            case RIGHT:
+                if (page < pages.size() -1) {
+                    page++;
+                    firstRow = 0;
+                }
+                break;
+            case ALTLEFT:
+                if (firstRow >= rowsPerPage-1) firstRow -= rowsPerPage-1;
+                else firstRow = 0;
+                break;
+            case ALTRIGHT:
+                if (firstRow + rowsPerPage*2 -1 < pages[page].text.size()) firstRow += rowsPerPage-1;
+                else firstRow = max(0, pages[page].text.size() - rowsPerPage);
+                break;
+            case CANCEL:
+            case SETTINGS:
+                close = true;
+                break;
+            default:
+                break;
+        }
+        
+        /*
 		gmenu2x->input.update();
 		if ( gmenu2x->input[ACTION_UP   ] && firstRow>0 ) firstRow--;
 		if ( gmenu2x->input[ACTION_DOWN ] && firstRow+rowsPerPage<pages[page].text.size() ) firstRow++;
@@ -118,5 +157,6 @@ void TextManualDialog::exec() {
 				firstRow = max(0,pages[page].text.size()-rowsPerPage);
 		}
 		if ( gmenu2x->input[ACTION_START] || gmenu2x->input[ACTION_X] ) close = true;
+        */
 	}
 }

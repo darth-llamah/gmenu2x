@@ -18,64 +18,30 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 #include "menusettingdir.h"
+#include "iconbutton.h"
 #include "dirdialog.h"
-#include "utilities.h"
 
-using namespace std;
-using namespace fastdelegate;
+using std::string;
+using fastdelegate::MakeDelegate;
 
-MenuSettingDir::MenuSettingDir(GMenu2X *gmenu2x, string name, string description, string *value)
-	: MenuSetting(gmenu2x,name,description) {
-	this->gmenu2x = gmenu2x;
-	_value = value;
-	originalValue = *value;
+MenuSettingDir::MenuSettingDir(
+		GMenu2X *gmenu2x, const string &name,
+		const string &description, string *value)
+	: MenuSettingStringBase(gmenu2x, name, description, value)
+{
+	IconButton *btn;
 
-	btnClear = new IconButton(gmenu2x, "skin:imgs/buttons/x.png", gmenu2x->tr["Clear"]);
-	btnClear->setAction(MakeDelegate(this, &MenuSettingDir::clear));
+	btn = new IconButton(gmenu2x, "skin:imgs/buttons/cancel.png", gmenu2x->tr["Clear"]);
+	btn->setAction(MakeDelegate(this, &MenuSettingDir::clear));
+	buttonBox.add(btn);
 
-	btnSelect = new IconButton(gmenu2x, "skin:imgs/buttons/b.png", gmenu2x->tr["Select a directory"]);
-	btnSelect->setAction(MakeDelegate(this, &MenuSettingDir::select));
+	btn = new IconButton(gmenu2x, "skin:imgs/buttons/accept.png", gmenu2x->tr["Select a directory"]);
+	btn->setAction(MakeDelegate(this, &MenuSettingDir::edit));
+	buttonBox.add(btn);
 }
 
-void MenuSettingDir::draw(int y) {
-	MenuSetting::draw(y);
-	gmenu2x->s->write( gmenu2x->font, value(), 155, y+gmenu2x->font->getHalfHeight(), SFontHAlignLeft, SFontVAlignMiddle );
-}
-
-void MenuSettingDir::handleTS() {
-	btnSelect->handleTS();
-	btnClear->handleTS();
-}
-
-void MenuSettingDir::manageInput() {
-	if ( gmenu2x->input[ACTION_X] ) setValue("");
-	if ( gmenu2x->input[ACTION_B] ) select();
-}
-
-void MenuSettingDir::clear() {
-	setValue("");
-}
-
-void MenuSettingDir::select() {
+void MenuSettingDir::edit()
+{
 	DirDialog dd(gmenu2x, description, value());
-	if (dd.exec()) setValue( dd.path );
-}
-
-void MenuSettingDir::setValue(string value) {
-	*_value = value;
-}
-
-string MenuSettingDir::value() {
-	return *_value;
-}
-
-void MenuSettingDir::adjustInput() {}
-
-void MenuSettingDir::drawSelected(int) {
-	gmenu2x->drawButton(btnClear,
-	gmenu2x->drawButton(btnSelect));
-}
-
-bool MenuSettingDir::edited() {
-	return originalValue != value();
+	if (dd.exec()) setValue( dd.getPath() );
 }

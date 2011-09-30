@@ -25,16 +25,20 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <fstream>
 
 #include "menu.h"
 #include "linkapp.h"
 #include "selector.h"
 #include "filelister.h"
+#include "gmenu2x.h"
+#include "debug.h"
 
 using namespace std;
 
-Selector::Selector(GMenu2X *gmenu2x, LinkApp *link, string selectorDir) {
-	this->gmenu2x = gmenu2x;
+Selector::Selector(GMenu2X *gmenu2x, LinkApp *link, const string &selectorDir) :
+	Dialog(gmenu2x)
+{
 	this->link = link;
 	loadAliases();
 	selRow = 0;
@@ -54,18 +58,21 @@ int Selector::exec(int startSelection) {
 	fl.browse();
 
 	Surface bg(gmenu2x->bg);
-	gmenu2x->drawTitleIcon(link->getIconPath(),true,&bg);
-	gmenu2x->writeTitle(link->getTitle(),&bg);
-	gmenu2x->writeSubTitle(link->getDescription(),&bg);
+	drawTitleIcon(link->getIconPath(), true, &bg);
+	writeTitle(link->getTitle(), &bg);
+	writeSubTitle(link->getDescription(), &bg);
 
 	if (link->getSelectorBrowser()) {
 		gmenu2x->drawButton(&bg, "start", gmenu2x->tr["Exit"],
-		gmenu2x->drawButton(&bg, "b", gmenu2x->tr["Select a file"],
-		gmenu2x->drawButton(&bg, "x", gmenu2x->tr["Up one folder"], 5)));
+		gmenu2x->drawButton(&bg, "accept", gmenu2x->tr["Select a file"],
+		gmenu2x->drawButton(&bg, "cancel", gmenu2x->tr["Up one folder"],
+		gmenu2x->drawButton(&bg, "left", "", 5)-10)));
 	} else {
-		gmenu2x->drawButton(&bg, "x", gmenu2x->tr["Exit"],
-		gmenu2x->drawButton(&bg, "b", gmenu2x->tr["Select a file"], 5));
+		gmenu2x->drawButton(&bg, "start", gmenu2x->tr["Exit"],
+		gmenu2x->drawButton(&bg, "accept", gmenu2x->tr["Select a file"], 5));
 	}
+
+	bg.convertToDisplayFormat();
 
 	Uint32 selTick = SDL_GetTicks(), curTick;
 	uint i, firstElement = 0, iY;
@@ -87,7 +94,7 @@ int Selector::exec(int startSelection) {
 		iY = selected-firstElement;
 		iY = 42+(iY*16);
 		if (selected<fl.size())
-			gmenu2x->s->box(1, iY, 309, 14, gmenu2x->skinConfColors["selectionBg"]);
+			gmenu2x->s->box(1, iY, 309, 14, gmenu2x->skinConfColors[COLOR_SELECTION_BG]);
 
 		//Screenshot
 		if (selected-fl.dirCount()<screens.size() && screens[selected-fl.dirCount()]!="") {
@@ -102,16 +109,72 @@ int Selector::exec(int startSelection) {
 			iY = i-firstElement;
 			if (fl.isDirectory(i)) {
 				gmenu2x->sc["imgs/folder.png"]->blit(gmenu2x->s, 4, 42+(iY*16));
-				gmenu2x->s->write(gmenu2x->font, fl[i], 21, 49+(iY*16), SFontHAlignLeft, SFontVAlignMiddle);
+				gmenu2x->s->write(gmenu2x->font, fl[i], 21, 49+(iY*16), ASFont::HAlignLeft, ASFont::VAlignMiddle);
 			} else
-				gmenu2x->s->write(gmenu2x->font, titles[i-fl.dirCount()], 4, 49+(iY*16), SFontHAlignLeft, SFontVAlignMiddle);
+				gmenu2x->s->write(gmenu2x->font, titles[i-fl.dirCount()], 4, 49+(iY*16), ASFont::HAlignLeft, ASFont::VAlignMiddle);
 		}
 		gmenu2x->s->clearClipRect();
 
 		gmenu2x->drawScrollBar(SELECTOR_ELEMENTS,fl.size(),firstElement,42,175);
 		gmenu2x->s->flip();
 
+        switch (gmenu2x->input.waitForPressedButton()) {
+            case SETTINGS:
+                close = true;
+                result = false;
+                break;
+            case UP:
+                if (selected == 0) selected = fl.size() -1;
+                else selected -= 1;
+                selTick = SDL_GetTicks();
+                break;
+            case ALTLEFT:
+                if ((int)(selected-SELECTOR_ELEMENTS+1)<0) selected = 0;
+                else selected -= SELECTOR_ELEMENTS-1;
+                selTick = SDL_GetTicks();
+                break;
+            case DOWN:
+                if (selected+1>=fl.size()) selected = 0;
+                else selected += 1;
+                selTick = SDL_GetTicks();
+                break;
+            case ALTRIGHT:
+                if (selected+SELECTOR_ELEMENTS-1>=fl.size()) selected = fl.size()-1;
+                else selected += SELECTOR_ELEMENTS-1;
+                selTick = SDL_GetTicks();
+                break;
+            case CANCEL:
+            case LEFT:
+                if (link->getSelectorBrowser()) {
+                    string::size_type p = dir.rfind("/", dir.size()-2);
+                    if (p==string::npos || dir.compare(0, 1, "/") != 0 || dir.length() < 2) {
+                        close = true;
+                        result = false;
+                    } else {
+                        dir = dir.substr(0,p+1);
+                        INFO("%s\n", dir.c_str());
+                        selected = 0;
+                        firstElement = 0;
+                        prepare(&fl,&screens,&titles);
+                    }
+                }
+                break;
+            case ACCEPT:
+                if (fl.isFile(selected)) {
+                    file = fl[selected];
+                    close = true;
+                } else {
+                    dir = dir+fl[selected]+"/";
+                    selected = 0;
+                    firstElement = 0;
+                    prepare(&fl,&screens,&titles);
+                }
+                break;
+            default:
+                break;
+        }
 
+        /*
 		gmenu2x->input.update();
 		if ( gmenu2x->input[ACTION_START] ) { close = true; result = false; }
 		if ( gmenu2x->input[ACTION_UP] ) {
@@ -149,12 +212,12 @@ int Selector::exec(int startSelection) {
 		if ( gmenu2x->input[ACTION_X] ) {
 			if (link->getSelectorBrowser()) {
 				string::size_type p = dir.rfind("/", dir.size()-2);
-				if (p==string::npos || dir.substr(0,4)!="/boot/local" || p<4) {
+				if (p==string::npos || dir.compare(0, 1, "/") != 0 || dir.length() < 2) {
 					close = true;
 					result = false;
 				} else {
 					dir = dir.substr(0,p+1);
-					cout << dir << endl;
+					INFO("%s\n", dir.c_str());
 					selected = 0;
 					firstElement = 0;
 					prepare(&fl,&screens,&titles);
@@ -175,6 +238,7 @@ int Selector::exec(int startSelection) {
 				prepare(&fl,&screens,&titles);
 			}
 		}
+        */
 	}
 	gmenu2x->sc.defaultAlpha = true;
 	freeScreenshots(&screens);
@@ -185,25 +249,25 @@ int Selector::exec(int startSelection) {
 void Selector::prepare(FileLister *fl, vector<string> *screens, vector<string> *titles) {
 	fl->setPath(dir);
 	freeScreenshots(screens);
-	screens->resize(fl->files.size());
-	titles->resize(fl->files.size());
+	screens->resize(fl->getFiles().size());
+	titles->resize(fl->getFiles().size());
 
 	string screendir = link->getSelectorScreens();
 	if (screendir != "" && screendir[screendir.length()-1]!='/') screendir += "/";
 
 	string noext;
 	string::size_type pos;
-	for (uint i=0; i<fl->files.size(); i++) {
-		noext = fl->files[i];
+	for (uint i=0; i<fl->getFiles().size(); i++) {
+		noext = fl->getFiles()[i];
 		pos = noext.rfind(".");
 		if (pos!=string::npos && pos>0)
 			noext = noext.substr(0, pos);
 		titles->at(i) = getAlias(noext);
 		if (titles->at(i)=="")
 			titles->at(i) = noext;
-#ifdef DEBUG
-		cout << "\033[0;34mGMENU2X:\033[0m Searching for screen " << screendir << noext << ".png" << endl;
-#endif
+
+		DEBUG("Searching for screen '%s%s.png'\n", screendir.c_str(), noext.c_str());
+
 		if (fileExists(screendir+noext+".png"))
 			screens->at(i) = screendir+noext+".png";
 		else if (fileExists(screendir+noext+".jpg"))
@@ -235,8 +299,8 @@ void Selector::loadAliases() {
 	}
 }
 
-string Selector::getAlias(string key) {
-	hash_map<string, string>::iterator i = aliases.find(key);
+string Selector::getAlias(const string &key) {
+	unordered_map<string, string>::iterator i = aliases.find(key);
 	if (i == aliases.end())
 		return "";
 	else

@@ -24,6 +24,7 @@
 #include <iostream>
 
 #include "button.h"
+#include "surface.h"
 
 using std::string;
 
@@ -39,10 +40,15 @@ private:
 	uint iconX, padding;
 
 protected:
+	GMenu2X *gmenu2x;
 	bool edited;
 	string title, description, icon, iconPath;
 
+	Surface *iconSurface;
+	Surface *icon_hover;
+
 	void recalcCoordinates();
+	void updateSurfaces();
 
 public:
 	Link(GMenu2X *gmenu2x);
@@ -54,15 +60,15 @@ public:
 	void setSize(int w, int h);
 	void setPosition(int x, int y);
 
-	string getTitle();
-	void setTitle(string title);
-	string getDescription();
-	void setDescription(string description);
-	string getIcon();
-	void setIcon(string icon);
-	virtual string searchIcon();
-	string getIconPath();
-	void setIconPath(string icon);
+	const string &getTitle();
+	void setTitle(const string &title);
+	const string &getDescription();
+	void setDescription(const string &description);
+	const string &getIcon();
+	void setIcon(const string &icon);
+	virtual const string &searchIcon();
+	const string &getIconPath();
+	void setIconPath(const string &icon);
 
 	virtual void run();
 };

@@ -28,6 +28,7 @@
 using std::string;
 
 class GMenu2X;
+class InputManager;
 
 /**
 Parses links files.
@@ -36,74 +37,72 @@ Parses links files.
 */
 class LinkApp : public Link {
 private:
+	InputManager &inputMgr;
 	string sclock, svolume;
 	int iclock, ivolume;
 	//G
 	string sgamma;
-	string sbacklight;
 	//G
 	int igamma;
-	int ibacklight;
 	string exec, params, workdir, manual, selectordir, selectorfilter, selectorscreens;
 	bool selectorbrowser, useRamTimings;
 	void drawRun();
 
 	string aliasfile;
-
-public:
-	LinkApp(GMenu2X *gmenu2x, const char* linkfile);
-	virtual string searchIcon();
-
-	string getExec();
-	void setExec(string exec);
-	string getParams();
-	void setParams(string params);
-	string getWorkdir();
-	void setWorkdir(string workdir);
-	string getManual();
-	void setManual(string manual);
-	string getSelectorDir();
-	void setSelectorDir(string selectordir);
-	bool getSelectorBrowser();
-	void setSelectorBrowser(bool value);
-	bool getUseRamTimings();
-	void setUseRamTimings(bool value);
-	string getSelectorScreens();
-	void setSelectorScreens(string selectorscreens);
-	string getSelectorFilter();
-	void setSelectorFilter(string selectorfilter);
-	string getAliasFile();
-	void setAliasFile(string aliasfile);
-
 	string file;
-
-	int clock();
-	string clockStr(int maxClock);
-	void setClock(int mhz);
-
-	int volume();
-	string volumeStr();
-	void setVolume(int vol);
-
-//G
-	int gamma();
-	string gammaStr();
-	void setGamma(int gamma);
-
-	int backlight();
-	string backlightStr();
-	void setBacklight(int val);
-// /G
 
 	bool wrapper;
 	bool dontleave;
 
+public:
+	LinkApp(GMenu2X *gmenu2x, InputManager &inputMgr, const char* linkfile);
+	virtual const string &searchIcon();
+
+	const string &getExec();
+	void setExec(const string &exec);
+	const string &getParams();
+	void setParams(const string &params);
+	const string &getWorkdir();
+	void setWorkdir(const string &workdir);
+	const string &getManual();
+	void setManual(const string &manual);
+	const string &getSelectorDir();
+	void setSelectorDir(const string &selectordir);
+	bool getSelectorBrowser();
+	void setSelectorBrowser(bool value);
+	bool getUseRamTimings();
+	void setUseRamTimings(bool value);
+	const string &getSelectorScreens();
+	void setSelectorScreens(const string &selectorscreens);
+	const string &getSelectorFilter();
+	void setSelectorFilter(const string &selectorfilter);
+	const string &getAliasFile();
+	void setAliasFile(const string &aliasfile);
+
+	int clock();
+	const string &clockStr(int maxClock);
+	void setClock(int mhz);
+
+	int volume();
+	const string &volumeStr();
+	void setVolume(int vol);
+
+//G
+	int gamma();
+	const string &gammaStr();
+	void setGamma(int gamma);
+
 	bool save();
 	void run();
 	void showManual();
-	void selector(int startSelection=0, string selectorDir="");
-	void launch(string selectedFile="", string selectedDir="");
+	void selector(int startSelection=0, const string &selectorDir="");
+	void launch(const string &selectedFile="", const string &selectedDir="");
 	bool targetExists();
+
+	const string &getFile() { return file; }
+	void renameFile(const string &name);
+	bool &needsWrapperRef() { return wrapper; }
+	bool &runsInBackgroundRef() { return dontleave; }
 };
 
 #endif

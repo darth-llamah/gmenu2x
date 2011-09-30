@@ -18,58 +18,73 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 #include "menusettingbool.h"
+#include "gmenu2x.h"
 #include "utilities.h"
+
 #include <sstream>
 
-using namespace std;
-using namespace fastdelegate;
+using std::string;
+using fastdelegate::MakeDelegate;
 
-MenuSettingBool::MenuSettingBool(GMenu2X *gmenu2x, string name, string description, int *value)
-	: MenuSetting(gmenu2x,name,description) {
-	this->gmenu2x = gmenu2x;
+MenuSettingBool::MenuSettingBool(
+		GMenu2X *gmenu2x, const string &name,
+		const string &description, int *value)
+	: MenuSetting(gmenu2x, name, description)
+{
 	_ivalue = value;
 	_value = NULL;
 	originalValue = *value != 0;
 	setValue(this->value());
-
-	btnToggle = new IconButton(gmenu2x, "skin:imgs/buttons/b.png", gmenu2x->tr["Switch"]);
-	btnToggle->setAction(MakeDelegate(this, &MenuSettingBool::toggle));
+	initButton();
 }
 
-MenuSettingBool::MenuSettingBool(GMenu2X *gmenu2x, string name, string description, bool *value)
-	: MenuSetting(gmenu2x,name,description) {
-	this->gmenu2x = gmenu2x;
+MenuSettingBool::MenuSettingBool(
+		GMenu2X *gmenu2x, const string &name,
+		const string &description, bool *value)
+	: MenuSetting(gmenu2x, name, description)
+{
 	_value = value;
 	_ivalue = NULL;
 	originalValue = *value;
 	setValue(this->value());
-
-	btnToggle = new IconButton(gmenu2x, "skin:imgs/buttons/b.png", gmenu2x->tr["Switch"]);
-	btnToggle->setAction(MakeDelegate(this, &MenuSettingBool::toggle));
+	initButton();
 }
 
-void MenuSettingBool::draw(int y) {
+void MenuSettingBool::initButton()
+{
+	IconButton *btn = new IconButton(gmenu2x, "skin:imgs/buttons/accept.png",
+									 gmenu2x->tr["Switch"]);
+	btn->setAction(MakeDelegate(this, &MenuSettingBool::toggle));
+	buttonBox.add(btn);
+}
+
+void MenuSettingBool::draw(int y)
+{
 	MenuSetting::draw(y);
-	gmenu2x->s->write( gmenu2x->font, strvalue, 155, y+gmenu2x->font->getHalfHeight(), SFontHAlignLeft, SFontVAlignMiddle );
+	gmenu2x->s->write( gmenu2x->font, strvalue, 155, y, ASFont::HAlignLeft, ASFont::VAlignTop );
 }
 
-void MenuSettingBool::handleTS() {
-	btnToggle->handleTS();
+bool MenuSettingBool::manageInput(bevent_t *event)
+{
+    if (event->button == ACCEPT && event->state == PRESSED) {
+		toggle();
+		return true;
+	}
+	return false;
 }
 
-void MenuSettingBool::manageInput() {
-	if ( gmenu2x->input[ACTION_B] ) toggle();
-}
-
-void MenuSettingBool::toggle() {
+void MenuSettingBool::toggle()
+{
 	setValue(!value());
 }
 
-void MenuSettingBool::setValue(int value) {
+void MenuSettingBool::setValue(int value)
+{
 	setValue(value != 0);
 }
 
-void MenuSettingBool::setValue(bool value) {
+void MenuSettingBool::setValue(bool value)
+{
 	if (_value == NULL)
 		*_ivalue = value;
 	else
@@ -77,19 +92,15 @@ void MenuSettingBool::setValue(bool value) {
 	strvalue = value ? "ON" : "OFF";
 }
 
-bool MenuSettingBool::value() {
+bool MenuSettingBool::value()
+{
 	if (_value == NULL)
 		return *_ivalue != 0;
 	else
 		return *_value;
 }
 
-void MenuSettingBool::adjustInput() {}
-
-void MenuSettingBool::drawSelected(int) {
-	gmenu2x->drawButton(btnToggle);
-}
-
-bool MenuSettingBool::edited() {
+bool MenuSettingBool::edited()
+{
 	return originalValue != value();
 }

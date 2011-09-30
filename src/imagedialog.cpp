@@ -31,23 +31,18 @@
 
 using namespace std;
 
-ImageDialog::ImageDialog(GMenu2X *gmenu2x, string text, string filter, string file) : FileDialog(gmenu2x, text, filter, file) {
-	this->gmenu2x = gmenu2x;
-	this->text = text;
-	this->filter = filter;
-	this->file = "";
-	setPath("/boot/local");
-	title = "Image Browser";
+ImageDialog::ImageDialog(GMenu2X *gmenu2x, const string &text,
+	const string &filter, const string &file) :
+	FileDialog(gmenu2x, text, filter, file, "Image Browser") {
+
+	string path;
+
 	if (!file.empty()) {
-		file = strreplace(file,"skin:",gmenu2x->getExePath()+"skins/"+gmenu2x->confStr["skin"]+"/");
-		string::size_type pos = file.rfind("/");
-		if (pos != string::npos) {
-			setPath( file.substr(0, pos) );
-			cout << "ib: " << path() << endl;
-			this->file = file.substr(pos+1,file.length());
-		}
+		path = strreplace(file, "skin:", gmenu2x->getExePath()+"skins/"+gmenu2x->confStr["skin"]+"/");
+		string::size_type pos = path.rfind("/");
+		if (pos != string::npos)
+			setPath(path.substr(0, pos));
 	}
-	selRow = 0;
 }
 
 ImageDialog::~ImageDialog() {
@@ -55,8 +50,8 @@ ImageDialog::~ImageDialog() {
 }
 
 void ImageDialog::beforeFileList() {
-	if (fl.isFile(selected) && fileExists(path()+"/"+fl[selected]))
-		previews[path()+"/"+fl[selected]]->blitRight(gmenu2x->s, 310, 43);
+	if (fl->isFile(selected) && fileExists(getPath()+"/"+(*fl)[selected]))
+		previews[getPath()+"/"+(*fl)[selected]]->blitRight(gmenu2x->s, 310, 43);
 }
 
 void ImageDialog::onChangeDir() {

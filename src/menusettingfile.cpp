@@ -18,65 +18,33 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 #include "menusettingfile.h"
+#include "iconbutton.h"
 #include "filedialog.h"
-#include "utilities.h"
 
-using namespace std;
-using namespace fastdelegate;
+using std::string;
+using fastdelegate::MakeDelegate;
 
-MenuSettingFile::MenuSettingFile(GMenu2X *gmenu2x, string name, string description, string *value, string filter)
-	: MenuSetting(gmenu2x,name,description) {
-	this->gmenu2x = gmenu2x;
-	this->filter = filter;
-	_value = value;
-	originalValue = *value;
+MenuSettingFile::MenuSettingFile(
+		GMenu2X *gmenu2x, const string &name,
+		const string &description, string *value, const string &filter_)
+	: MenuSettingStringBase(gmenu2x, name, description, value)
+	, filter(filter_)
+{
+	IconButton *btn;
 
-	btnClear = new IconButton(gmenu2x, "skin:imgs/buttons/x.png", gmenu2x->tr["Clear"]);
-	btnClear->setAction(MakeDelegate(this, &MenuSettingFile::clear));
+	btn = new IconButton(gmenu2x, "skin:imgs/buttons/cancel.png", gmenu2x->tr["Clear"]);
+	btn->setAction(MakeDelegate(this, &MenuSettingFile::clear));
+	buttonBox.add(btn);
 
-	btnSelect = new IconButton(gmenu2x, "skin:imgs/buttons/b.png", gmenu2x->tr["Select a file"]);
-	btnSelect->setAction(MakeDelegate(this, &MenuSettingFile::select));
+	btn = new IconButton(gmenu2x, "skin:imgs/buttons/accept.png", gmenu2x->tr["Select a file"]);
+	btn->setAction(MakeDelegate(this, &MenuSettingFile::edit));
+	buttonBox.add(btn);
 }
 
-void MenuSettingFile::draw(int y) {
-	MenuSetting::draw(y);
-	gmenu2x->s->write( gmenu2x->font, value(), 155, y+gmenu2x->font->getHalfHeight(), SFontHAlignLeft, SFontVAlignMiddle );
-}
-
-void MenuSettingFile::handleTS() {
-	btnSelect->handleTS();
-	btnClear->handleTS();
-}
-
-void MenuSettingFile::manageInput() {
-	if ( gmenu2x->input[ACTION_X] ) setValue("");
-	if ( gmenu2x->input[ACTION_B] ) select();
-}
-
-void MenuSettingFile::clear() {
-	setValue("");
-}
-
-void MenuSettingFile::select() {
+void MenuSettingFile::edit()
+{
 	FileDialog fd(gmenu2x, description, filter, value());
-	if (fd.exec()) setValue( fd.path()+"/"+fd.file );
-}
-
-void MenuSettingFile::setValue(string value) {
-	*_value = value;
-}
-
-string MenuSettingFile::value() {
-	return *_value;
-}
-
-void MenuSettingFile::adjustInput() {}
-
-void MenuSettingFile::drawSelected(int) {
-	gmenu2x->drawButton(btnClear,
-	gmenu2x->drawButton(btnSelect));
-}
-
-bool MenuSettingFile::edited() {
-	return originalValue != value();
+	if (fd.exec()) {
+		setValue(fd.getPath() + "/" + fd.getFile());
+	}
 }

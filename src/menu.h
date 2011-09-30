@@ -42,28 +42,35 @@ private:
 	GMenu2X *gmenu2x;
 	int iSection, iLink;
 	uint iFirstDispSection, iFirstDispRow;
+	vector<string> sections;
+	vector<linklist> links;
+
 	void readLinks();
 	void freeLinks();
+
+	// Load all the sections of the given "sections" directory.
+	void readSections(std::string parentDir);
+
+	// Load all the links on the given section directory.
+	void readLinksOfSection(std::string path, std::vector<std::string> &linkfiles);
 
 public:
 	Menu(GMenu2X *gmenu2x);
 	~Menu();
 
-	vector<string> sections;
-	vector<linklist> links;
 	linklist *sectionLinks(int i = -1);
 
 	int selSectionIndex();
-	string selSection();
+	const string &selSection();
 	void decSectionIndex();
 	void incSectionIndex();
 	void setSectionIndex(int i);
 	uint firstDispSection();
 	uint firstDispRow();
 
-	bool addActionLink(uint section, string title, LinkRunAction action, string description="", string icon="");
+	bool addActionLink(uint section, const string &title, LinkRunAction action, const string &description="", const string &icon="");
 	bool addLink(string path, string file, string section="");
-	bool addSection(string sectionName);
+	bool addSection(const string &sectionName);
 	void deleteSelectedLink();
 	void deleteSelectedSection();
 
@@ -79,7 +86,8 @@ public:
 	void linkDown();
 	void setLinkIndex(int i);
 
-	string sectionPath(int section = -1);
+	const vector<string> &getSections() { return sections; }
+	void renameSection(int index, const string &name);
 };
 
 #endif

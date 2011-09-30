@@ -21,10 +21,6 @@
 #ifndef GMENU2X_H
 #define GMENU2X_H
 
-#include <string>
-#include <iostream>
-#include <google/dense_hash_map>
-
 #include "surfacecollection.h"
 #include "iconbutton.h"
 #include "translator.h"
@@ -32,6 +28,23 @@
 #include "utilities.h"
 #include "touchscreen.h"
 #include "inputmanager.h"
+#include "asfont.h"
+#include "surface.h"
+#include "powersaver.h"
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <tr1/unordered_map>
+
+#ifndef GMENU2X_SYSTEM_DIR
+#define GMENU2X_SYSTEM_DIR "/usr/share/gmenu2x"
+#endif
+
+#ifndef DEFAULT_WALLPAPER_PATH
+#define DEFAULT_WALLPAPER_PATH \
+  GMENU2X_SYSTEM_DIR "/skins/Default/wallpapers/default.png"
+#endif
 
 const int MAX_VOLUME_SCALE_FACTOR = 200;
 // Default values - going to add settings adjustment, saving, loading and such
@@ -45,16 +58,30 @@ const int BATTERY_READS = 10;
 
 const int LOOP_DELAY=30000;
 
+extern const char *CARD_ROOT;
+extern const int CARD_ROOT_LEN;
+
 extern void jz_cpuspeed(unsigned clockspeed);
 
+// Note: Keep this in sync with colorNames!
+enum color {
+	COLOR_TOP_BAR_BG,
+	COLOR_BOTTOM_BAR_BG,
+	COLOR_SELECTION_BG,
+	COLOR_MESSAGE_BOX_BG,
+	COLOR_MESSAGE_BOX_BORDER,
+	COLOR_MESSAGE_BOX_SELECTION,
+
+	NUM_COLORS,
+};
+
 using std::string;
+using std::vector;
 using fastdelegate::FastDelegate0;
-using google::dense_hash_map;
 
 typedef FastDelegate0<> MenuAction;
-typedef dense_hash_map<string, string, hash<string> > ConfStrHash;
-typedef dense_hash_map<string, int, hash<string> > ConfIntHash;
-typedef dense_hash_map<string, RGBAColor, hash<string> > ConfRGBAHash;
+typedef unordered_map<string, string, hash<string> > ConfStrHash;
+typedef unordered_map<string, int, hash<string> > ConfIntHash;
 
 typedef struct {
 	unsigned short batt;
@@ -75,17 +102,23 @@ private:
 	Retrieves the free disk space on the sd
 	@return String containing a human readable representation of the free disk space
 	*/
-	string getDiskFree();
+	string getDiskFree(const char *path);
 	unsigned short cpuX; //!< Offset for displaying cpu clock information
 	unsigned short volumeX; //!< Offset for displaying volume level
 	unsigned short manualX; //!< Offset for displaying the manual indicator in the taskbar
+	unsigned cpuFreqMin; //!< Minimum CPU frequency
+	unsigned cpuFreqMax; //!< Maximum theoretical CPU frequency
+	unsigned cpuFreqSafeMax; //!< Maximum safe CPU frequency
+	unsigned cpuFreqMenuDefault; //!< Default CPU frequency for gmenu2x
+	unsigned cpuFreqAppDefault; //!< Default CPU frequency for launched apps
+	unsigned cpuFreqMultiple; //!< All valid CPU frequencies are a multiple of this
 	/*!
 	Reads the current battery state and returns a number representing it's level of charge
 	@return A number representing battery charge. 0 means fully discharged. 5 means fully charged. 6 represents a gp2x using AC power.
 	*/
 	unsigned short getBatteryLevel();
-	FILE* batteryHandle, *backlightHandle;
-	void browsePath(string path, vector<string>* directories, vector<string>* files);
+	FILE* batteryHandle, *backlightHandle, *usbHandle, *acHandle;
+	void browsePath(const string &path, vector<string>* directories, vector<string>* files);
 	/*!
 	Starts the scanning of the nand and sd filesystems, searching for dge and gpu files and creating the links in 2 dedicated sections.
 	*/
@@ -105,34 +138,45 @@ private:
 		usbnet,
 		samba,
 		web;
+
 	string ip, defaultgw, lastSelectorDir;
 	int lastSelectorElement;
 	void readConfig();
-	void readConfigOpen2x();
+	void readConfig(string path);
 	void readTmp();
-	void readCommonIni();
-	void writeCommonIni();
 
 	void initServices();
 	void initFont();
 	void initMenu();
 
-#ifdef TARGET_GP2X
+#ifdef PLATFORM_GP2X
+	void readConfigOpen2x();
+	void readCommonIni();
+	void writeCommonIni();
+
 	unsigned long gp2x_mem;
 	unsigned short *gp2x_memregs;
 	volatile unsigned short *MEM_REG;
 	int cx25874; //tv-out
 #endif
-	void gp2x_tvout_on(bool pal);
-	void gp2x_tvout_off();
-	void gp2x_init();
-	void gp2x_deinit();
+
+	void tvout_on(bool pal);
+	void tvout_off();
+	void initCPULimits();
+	void init();
+	void deinit();
 	void toggleTvOut();
 
+	void showManual();
+
 public:
-	GMenu2X(int argc, char *argv[]);
+	GMenu2X();
 	~GMenu2X();
 	void quit();
+
+	/* Returns the home directory of gmenu2x, usually
+	 * ~/.gmenu2x */
+	static const string getHome(void);
 
 	/*
 	 * Variables needed for elements disposition
@@ -146,7 +190,7 @@ public:
 	@see path
 	@return String containing the parent directory
 	*/
-	string getExePath();
+	const string &getExePath();
 
 	InputManager input;
 	Touchscreen ts;
@@ -154,20 +198,23 @@ public:
 	//Configuration hashes
 	ConfStrHash confStr, skinConfStr;
 	ConfIntHash confInt, skinConfInt;
-	ConfRGBAHash skinConfColors;
+	RGBAColor skinConfColors[NUM_COLORS];
 
 	//Configuration settings
 	bool useSelectionPng;
-	void setSkin(string skin, bool setWallpaper = true);
+	void setSkin(const string &skin, bool setWallpaper = true);
+
+#ifdef PLATFORM_GP2X
 	//firmware type and version
 	string fwType, fwVersion;
-	//gp2x type
-	bool f200;
+
+	bool isF200() { return ts.initialized(); }
 
 	// Open2x settings ---------------------------------------------------------
 	bool o2x_usb_net_on_boot, o2x_ftp_on_boot, o2x_telnet_on_boot, o2x_gp2xjoy_on_boot, o2x_usb_host_on_boot, o2x_usb_hid_on_boot, o2x_usb_storage_on_boot;
 	string o2x_usb_net_ip;
 	int volumeMode, savedVolumeMode;		//	just use the const int scale values at top of source
+#endif
 
 	//  Volume scaling values to store from config files
 	int volumeScalerPhones;
@@ -180,18 +227,21 @@ public:
 	ASFont *font;
 
 	//Status functions
-	int main();
+	void main();
 	void options();
+#ifdef PLATFORM_GP2X
 	void settingsOpen2x();
+#endif
 	void skinMenu();
+	/*
 	void activateSdUsb();
 	void activateNandUsb();
 	void activateRootUsb();
+	*/
 	void about();
 	void viewLog();
 	void contextMenu();
 	void changeWallpaper();
-	void saveScreenshot();
 
 	void applyRamTimings();
 	void applyDefaultTimings();
@@ -210,9 +260,11 @@ public:
 	void setInputSpeed();
 
 	void writeConfig();
+#ifdef PLATFORM_GP2X
 	void writeConfigOpen2x();
+#endif
 	void writeSkinConfig();
-	void writeTmp(int selelem=-1, string selectordir="");
+	void writeTmp(int selelem=-1, const string &selectordir="");
 
 	void ledOn();
 	void ledOff();
@@ -225,14 +277,11 @@ public:
 	void deleteSection();
 
 	void initBG();
-	int drawButton(IconButton *btn, int x=5, int y=-10);
-	int drawButton(Surface *s, string btn, string text, int x=5, int y=-10);
-	int drawButtonRight(Surface *s, string btn, string text, int x=5, int y=-10);
+	int drawButton(Button *btn, int x=5, int y=-10);
+	int drawButton(Surface *s, const string &btn, const string &text, int x=5, int y=-10);
+	int drawButtonRight(Surface *s, const string &btn, const string &text, int x=5, int y=-10);
 	void drawScrollBar(uint pagesize, uint totalsize, uint pagepos, uint top, uint height);
 
-	void drawTitleIcon(string icon, bool skinRes=true, Surface *s=NULL);
-	void writeTitle(string title, Surface *s=NULL);
-	void writeSubTitle(string subtitle, Surface *s=NULL);
 	void drawTopBar(Surface *s=NULL);
 	void drawBottomBar(Surface *s=NULL);
 

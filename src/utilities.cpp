@@ -22,13 +22,18 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <fstream>
 #include <iostream>
+#include <strings.h>
+
+#include <SDL.h>
 
 #include "utilities.h"
+#include "debug.h"
 
 using namespace std;
 
-bool case_less::operator()(string const &left, string const &right) const {
+bool case_less::operator()(const string &left, const string &right) const {
 	return strcasecmp(left.c_str(), right.c_str()) < 0;
 }
 
@@ -43,18 +48,18 @@ string trim(const string& s) {
   return string(s, b, e - b + 1);
 }
 
-void string_copy(string s, char **cs) {
+void string_copy(const string &s, char **cs) {
 	*cs = (char*)malloc(s.length());
 	strcpy(*cs, s.c_str());
 }
 
-char * string_copy(string s) {
+char * string_copy(const string &s) {
 	char *cs = NULL;
 	string_copy(s, &cs);
 	return cs;
 }
 
-bool fileExists(string file) {
+bool fileExists(const string &file) {
 	fstream fin;
 	fin.open(file.c_str() ,ios::in);
 	bool exists = fin.is_open();
@@ -69,9 +74,7 @@ bool rmtree(string path) {
 	struct dirent *dptr;
 	string filepath;
 
-#ifdef DEBUG
-	cout << "RMTREE: " << path << endl;
-#endif
+	DEBUG("RMTREE: '%s'\n", path.c_str());
 
 	if ((dirp = opendir(path.c_str())) == NULL) return false;
 	if (path[path.length()-1]!='/') path += "/";
@@ -115,22 +118,12 @@ int evalIntConf (int *val, int def, int imin, int imax) {
 	return *val;
 }
 
-string evalStrConf (string val, string def) {
+const string &evalStrConf (const string &val, const string &def) {
 	return val.empty() ? def : val;
 }
-string evalStrConf (string *val, string def) {
+const string &evalStrConf (string *val, const string &def) {
 	*val = evalStrConf(*val, def);
 	return *val;
-}
-
-float max (float a, float b) {
-	return a>b ? a : b;
-}
-float min (float a, float b) {
-	return a<b ? a : b;
-}
-float constrain (float x, float imin, float imax) {
-	return min( imax, max(imin,x) );
 }
 
 bool split (vector<string> &vec, const string &str, const string &delim, bool destructive) {
@@ -168,7 +161,7 @@ bool split (vector<string> &vec, const string &str, const string &delim, bool de
 	return true;
 }
 
-string strreplace (string orig, string search, string replace) {
+string strreplace (string orig, const string &search, const string &replace) {
 	string::size_type pos = orig.find( search, 0 );
 	while (pos != string::npos) {
 		orig.replace(pos,search.length(),replace);
@@ -188,7 +181,6 @@ string cmdclean (string cmdline) {
 
 int intTransition(int from, int to, long tickStart, long duration, long tickNow) {
 	if (tickNow<0) tickNow = SDL_GetTicks();
-	float elapsed = (float)(tickNow-tickStart)/duration;
+	return constrain(((tickNow-tickStart) * (to-from)) / duration, from, to);
 	//                    elapsed                 increments
-	return constrain(round(elapsed*(to-from)),from,to);
 }

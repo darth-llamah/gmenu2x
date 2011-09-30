@@ -32,23 +32,29 @@ private:
 	string path, filter;
 	bool showDirectories, showFiles;
 
+	vector<string> directories, files, excludes;
+
 public:
-	FileLister(string startPath = "/boot/local", bool showDirectories = true, bool showFiles = true);
-	void browse();
+	FileLister(const string &startPath = "/boot/local", bool showDirectories = true, bool showFiles = true);
+	void browse(bool clean = true);
 
-	vector<string> directories, files, exclude;
-	uint size();
-	uint dirCount();
-	uint fileCount();
-	string operator[](uint);
-	string at(uint);
-	bool isFile(uint);
-	bool isDirectory(uint);
+	unsigned int size();
+	unsigned int dirCount();
+	unsigned int fileCount();
+	string operator[](unsigned int);
+	string at(unsigned int);
+	bool isFile(unsigned int);
+	bool isDirectory(unsigned int);
 
-	string getPath();
-	void setPath(string path, bool doBrowse=true);
-	string getFilter();
-	void setFilter(string filter);
+	const string &getPath();
+	void setPath(const string &path, bool doBrowse=true);
+	const string &getFilter();
+	void setFilter(const string &filter);
+
+	const vector<string> &getDirectories() { return directories; }
+	const vector<string> &getFiles() { return files; }
+	void insertFile(const string &file);
+	void addExclude(const string &exclude);
 };
 
 #endif /*FILELISTER_H_*/

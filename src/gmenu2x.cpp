@@ -21,6 +21,7 @@
 #include <iostream>
 #include <sstream>
 #include <fstream>
+#include <algorithm>
 #include <stdlib.h>
 #include <unistd.h>
 #include <math.h>
@@ -33,6 +34,13 @@
 
 #include "gp2x.h"
 #include <sys/fcntl.h> //for battery
+
+#ifdef PLATFORM_DINGUX
+#	define UNLOCK_VT
+#	include <sys/ioctl.h>
+#	include <linux/vt.h>
+#	include <linux/kd.h>
+#endif
 
 //for browsing the filesystem
 #include <sys/stat.h>
@@ -47,7 +55,6 @@
 #include "linkaction.h"
 #include "menu.h"
 #include "asfont.h"
-#include "sfontplus.h"
 #include "surface.h"
 #include "filedialog.h"
 #include "gmenu2x.h"
@@ -68,29 +75,176 @@
 #include "menusettingimage.h"
 #include "menusettingdir.h"
 
+#include "debug.h"
+
 #include <sys/mman.h>
 
-#ifdef TARGET_PANDORA
+#ifdef PLATFORM_PANDORA
 //#include <pnd_container.h>
 //#include <pnd_conf.h>
 //#include <pnd_discovery.h>
 #endif
 
+#ifdef _CARD_ROOT
+const char *CARD_ROOT = _CARD_ROOT;
+#elif defined(PLATFORM_DINGUX) || defined(PLATFORM_SPICA)
+const char *CARD_ROOT = "/media/";
+#else
+const char *CARD_ROOT = "/card/"; //Note: Add a trailing /!
+#endif
+const int CARD_ROOT_LEN = strlen(CARD_ROOT)-1;
+
+static GMenu2X *app;
+static string gmenu2x_home;
+
 using namespace std;
 using namespace fastdelegate;
 
-int main(int argc, char *argv[]) {
-	cout << "----" << endl;
-	cout << "GMenu2X starting: If you read this message in the logs, check http://gmenu2x.sourceforge.net/page/Troubleshooting for a solution" << endl;
-	cout << "----" << endl;
+// Note: Keep this in sync with the enum!
+static const char *colorNames[NUM_COLORS] = {
+	"topBarBg",
+	"bottomBarBg",
+	"selectionBg",
+	"messageBoxBg",
+	"messageBoxBorder",
+	"messageBoxSelection",
+};
 
-	signal(SIGINT,&exit);
-	GMenu2X app(argc,argv);
+static enum color stringToColor(const string &name)
+{
+	for (unsigned int i = 0; i < NUM_COLORS; i++) {
+		if (strcmp(colorNames[i], name.c_str()) == 0) {
+			return (enum color)i;
+		}
+	}
+	return (enum color)-1;
+}
+
+static const char *colorToString(enum color c)
+{
+	return colorNames[c];
+}
+
+static void quit_all(int err) {
+    delete app;
+    exit(err);
+}
+
+#ifdef UNLOCK_VT
+
+#define FB_TTY "/dev/tty%i"
+static void unlockVT()
+{
+	int i;
+	int fd;
+	char tty[10];
+
+	for (i=0; i < 10; i++) {
+		int mode;
+
+		sprintf(tty, FB_TTY, i);
+		fd = open(tty, O_RDWR);
+		if (fd < 0)
+		  continue;
+
+		if (ioctl(fd, KDGETMODE, &mode) < 0) {
+			WARNING("Unable to get mode for tty %i.\n", i);
+			close(fd);
+			return;
+		}
+
+		if (mode != KD_TEXT)
+		  break;
+
+		close(fd);
+	}
+
+	if (i==10) {
+		DEBUG("No graphic tty found.\n");
+		return;
+	}
+
+	DEBUG("Graphic tty found on %s.\n", tty);
+
+	if (ioctl(fd, KDSETMODE, KD_TEXT) < 0)
+		WARNING("unable to set keyboard mode.\n");
+
+	if (ioctl(fd, VT_UNLOCKSWITCH, 1) < 0)
+		WARNING("unable to unlock terminal.\n");
+
+	close(fd);
+}
+#endif
+
+const string GMenu2X::getHome(void)
+{
+	return gmenu2x_home;
+}
+
+int main(int /*argc*/, char * /*argv*/[]) {
+	INFO("----\nGMenu2X starting: If you read this message in the logs, check http://gmenu2x.sourceforge.net/page/Troubleshooting for a solution\n----\n");
+
+	signal(SIGINT, &quit_all);
+	signal(SIGSEGV,&quit_all);
+	signal(SIGTERM,&quit_all);
+
+	char *home = getenv("HOME");
+	if (home == NULL) {
+		ERROR("Unable to find gmenu2x home directory. The $HOME variable is not defined.\n");
+		return 1;
+	}
+
+	gmenu2x_home = (string)home + (string)"/.gmenu2x";
+	if (!fileExists(gmenu2x_home) && mkdir(gmenu2x_home.c_str(), 0770) < 0) {
+		ERROR("Unable to create gmenu2x home directory.\n");
+		return 1;
+	}
+
+	DEBUG("Home path: %s.\n", gmenu2x_home.c_str());
+
+	app = new GMenu2X();
+	DEBUG("Starting main()\n");
+	app->main();
+
 	return 0;
 }
 
-void GMenu2X::gp2x_init() {
-#ifdef TARGET_GP2X
+void GMenu2X::initCPULimits() {
+	// Note: These values are for the Dingoo.
+	//       The NanoNote does not have cpufreq enabled in its kernel and
+	//       other devices are not actively maintained.
+	// TODO: Read min and max from sysfs.
+#ifdef PLATFORM_SPICA //not sure about values, to be tested
+	cpuFreqMin = 66;
+	cpuFreqMax = 800;
+	cpuFreqSafeMax = 800;
+	cpuFreqMenuDefault = 400;
+	cpuFreqAppDefault = 400;
+	cpuFreqMultiple = 133;
+#else
+	cpuFreqMin = 30;
+	cpuFreqMax = 500;
+	cpuFreqSafeMax = 420;
+	cpuFreqMenuDefault = 200;
+	cpuFreqAppDefault = 384;
+	cpuFreqMultiple = 24;
+#endif
+	// Round min and max values to the specified multiple.
+	cpuFreqMin = ((cpuFreqMin + cpuFreqMultiple - 1) / cpuFreqMultiple)
+			* cpuFreqMultiple;
+	cpuFreqMax = (cpuFreqMax / cpuFreqMultiple) * cpuFreqMultiple;
+	cpuFreqSafeMax = (cpuFreqSafeMax / cpuFreqMultiple) * cpuFreqMultiple;
+	cpuFreqMenuDefault = (cpuFreqMenuDefault / cpuFreqMultiple) * cpuFreqMultiple;
+	cpuFreqAppDefault = (cpuFreqAppDefault / cpuFreqMultiple) * cpuFreqMultiple;
+}
+
+void GMenu2X::init() {
+	batteryHandle = 0;
+	backlightHandle = 0;
+	usbHandle = 0;
+	acHandle = 0;
+
+#ifdef PLATFORM_GP2X
 /*	gp2x_mem = open("/dev/mem", O_RDWR);
 	gp2x_memregs=(unsigned short *)mmap(0, 0x10000, PROT_READ|PROT_WRITE, MAP_SHARED, gp2x_mem, 0xc0000000);
 	MEM_REG=&gp2x_memregs[0];
@@ -98,27 +252,41 @@ void GMenu2X::gp2x_init() {
 		//if wm97xx fails to open, set f200 to false to prevent any further access to the touchscreen
 		f200 = ts.init();
 	}*/
-	batteryHandle = fopen("/proc/jz/battery", "r");
-	backlightHandle = fopen("/proc/jz/lcd_backlight","w+");
+#else
+	batteryHandle = fopen("/sys/class/power_supply/battery/capacity", "r");
+	usbHandle = fopen("/sys/class/power_supply/usb/online", "r");
+	acHandle = fopen("/sys/class/power_supply/ac/online", "r");
+	backlightHandle = fopen(
+#ifdef PLATFORM_NANONOTE
+		"/sys/class/backlight/gpm940b0-bl/brightness",
+#elif PLATFORM_SPICA
+		"/sys/class/backlight/s6d05a-lcd/brightness",
+#else
+		"/sys/class/backlight/pwm-backlight/brightness",
+#endif
+		"w+");
 #endif
 }
 
-void GMenu2X::gp2x_deinit() {
-#ifdef TARGET_GP2X
+void GMenu2X::deinit() {
+#ifdef PLATFORM_GP2X
 /*	if (gp2x_mem!=0) {
 		gp2x_memregs[0x28DA>>1]=0x4AB;
 		gp2x_memregs[0x290C>>1]=640;
 		close(gp2x_mem);
 	}
-	
+
 	if (f200) ts.deinit();*/
-#endif
+#else
 	if (batteryHandle) fclose(batteryHandle);
 	if (backlightHandle) fclose(backlightHandle);
+	if (usbHandle) fclose(usbHandle);
+	if (acHandle) fclose(acHandle);
+#endif
 }
 
-void GMenu2X::gp2x_tvout_on(bool pal) {
-#ifdef TARGET_GP2X
+void GMenu2X::tvout_on(bool /*pal*/) {
+#ifdef PLATFORM_GP2X
 /*	if (gp2x_mem!=0) {
 //		Ioctl_Dummy_t *msg;
 //		int TVHandle = ioctl(SDL_videofd, FBMMSP2CTRL, msg);
@@ -134,8 +302,8 @@ void GMenu2X::gp2x_tvout_on(bool pal) {
 #endif
 }
 
-void GMenu2X::gp2x_tvout_off() {
-#ifdef TARGET_GP2X
+void GMenu2X::tvout_off() {
+#ifdef PLATFORM_GP2X
 /*	if (gp2x_mem!=0) {
 		close(cx25874);
 		cx25874 = 0;
@@ -144,7 +312,10 @@ void GMenu2X::gp2x_tvout_off() {
 #endif
 }
 
-GMenu2X::GMenu2X(int argc, char *argv[]) {
+
+GMenu2X::GMenu2X()
+{
+#ifdef PLATFORM_GP2X
 	//Detect firmware version and type
 	if (fileExists("/etc/open2x")) {
 		fwType = "open2x";
@@ -153,22 +324,6 @@ GMenu2X::GMenu2X(int argc, char *argv[]) {
 		fwType = "gph";
 		fwVersion = "";
 	}
-#ifdef TARGET_GP2X
-	f200 = fileExists("/dev/touchscreen/wm97xx");
-#else
-	f200 = true;
-#endif
-
-	confStr.set_empty_key(" ");
-	confStr.set_deleted_key("");
-	confInt.set_empty_key(" ");
-	confInt.set_deleted_key("");
-	skinConfInt.set_empty_key(" ");
-	skinConfInt.set_deleted_key("");
-	skinConfStr.set_empty_key(" ");
-	skinConfStr.set_deleted_key("");
-	skinConfColors.set_empty_key(" ");
-	skinConfColors.set_deleted_key("");
 
 	//open2x
 	savedVolumeMode = 0;
@@ -184,12 +339,16 @@ GMenu2X::GMenu2X(int argc, char *argv[]) {
 	o2x_usb_host_on_boot = false;
 	o2x_usb_hid_on_boot = false;
 	o2x_usb_storage_on_boot = false;
+#endif
 
 	usbnet = samba = inet = web = false;
 	useSelectionPng = false;
 
+	initCPULimits();
 	//load config data
 	readConfig();
+
+#ifdef PLATFORM_GP2X
 	if (fwType=="open2x") {
 		readConfigOpen2x();
 		//	VOLUME MODIFIER
@@ -200,6 +359,7 @@ GMenu2X::GMenu2X(int argc, char *argv[]) {
 		}
 	} else
 		readCommonIni();
+#endif
 
 	halfX = resX/2;
 	halfY = resY/2;
@@ -209,13 +369,10 @@ GMenu2X::GMenu2X(int argc, char *argv[]) {
 	path = "";
 	getExePath();
 
-#ifdef TARGET_GP2X
-	gp2x_mem = 0;
-	cx25874 = 0;
-	batteryHandle = 0;
-	backlightHandle = 0;
+	init();
 
-	gp2x_init();
+#ifdef PLATFORM_GP2X
+	cx25874 = 0;
 
 	//Fix tv-out
 /*	if (gp2x_mem!=0) {
@@ -228,24 +385,24 @@ GMenu2X::GMenu2X(int argc, char *argv[]) {
 	}*/
 #endif
 
+#ifdef UNLOCK_VT
+	unlockVT();
+#endif
+
+	/* Do not clear the screen on exit.
+	 * This may require an SDL patch available at
+	 * https://github.com/mthuurne/opendingux-buildroot/blob
+	 * 			/opendingux-2010.11/package/sdl/sdl-fbcon-clear-onexit.patch
+	 */
+	setenv("SDL_FBCON_DONT_CLEAR", "1", 0);
+
 	//Screen
-	if( SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_JOYSTICK)<0 ) {
-		cout << "\033[0;34mGMENU2X:\033[0;31m Could not initialize SDL:\033[0m " << SDL_GetError() << endl;
+	if( SDL_Init(SDL_INIT_VIDEO|SDL_INIT_JOYSTICK)<0 ) {
+		ERROR("Could not initialize SDL: %s\n", SDL_GetError());
 		quit();
 	}
 
-	s = new Surface();
-#ifdef TARGET_GP2X
-	{
-		//I use a tmp variable to hide the cursor as soon as possible (and create the double buffer surface only after that)
-		//I'm forced to use SW surfaces since with HW there are issuse with changing the clock frequency
-		SDL_Surface *tmps = SDL_SetVideoMode(resX, resY, confInt["videoBpp"], SDL_SWSURFACE);
-		SDL_ShowCursor(0);
-		s->enableVirtualDoubleBuffer(tmps);
-	}
-#else
-	s->raw = SDL_SetVideoMode(resX, resY, confInt["videoBpp"], SDL_HWSURFACE|SDL_DOUBLEBUF);
-#endif
+	s = Surface::openOutputSurface(resX, resY, confInt["videoBpp"]);
 
 	bg = NULL;
 	font = NULL;
@@ -254,23 +411,29 @@ GMenu2X::GMenu2X(int argc, char *argv[]) {
 	initMenu();
 
 	if (!fileExists(confStr["wallpaper"])) {
-#ifdef DEBUG
-		cout << "Searching wallpaper" << endl;
-#endif
-		FileLister fl("skins/"+confStr["skin"]+"/wallpapers",false,true);
-		fl.setFilter(".png,.jpg,.jpeg,.bmp");
-		fl.browse();
-		if (fl.files.size()<=0 && confStr["skin"] != "Default")
-			fl.setPath("skins/Default/wallpapers",true);
-		if (fl.files.size()>0)
-			confStr["wallpaper"] = fl.getPath()+fl.files[0];
+		DEBUG("No wallpaper defined; we will take the default one.\n");
+		confStr["wallpaper"] = DEFAULT_WALLPAPER_PATH;
 	}
 
 	initBG();
-	input.init(path+"input.conf");
+
+	/* If a user-specified input.conf file exists, we load it;
+	 * otherwise, we load the default one. */
+	const char *input_file = (getHome() + "/input.conf").c_str();
+	if (fileExists(input_file)) {
+		DEBUG("Loading user-specific input.conf file: %s.\n", input_file);
+	} else {
+		input_file = GMENU2X_SYSTEM_DIR "/input.conf";
+		DEBUG("Loading system input.conf file: %s.\n", input_file);
+	}
+
+	input.init(input_file);
+
+	if (confInt["backlightTimeout"] > 0)
+        PowerSaver::getInstance()->setScreenTimeout( confInt["backlightTimeout"] );
+
 	setInputSpeed();
 	initServices();
-	setBacklight(confInt["backlight"]);
 	setVolume(confInt["globalVolume"]);
 	applyDefaultTimings();
 	setClock(confInt["menuClock"]);
@@ -279,50 +442,45 @@ GMenu2X::GMenu2X(int argc, char *argv[]) {
 	if (lastSelectorElement>-1 && menu->selLinkApp()!=NULL && (!menu->selLinkApp()->getSelectorDir().empty() || !lastSelectorDir.empty()))
 		menu->selLinkApp()->selector(lastSelectorElement,lastSelectorDir);
 
-#ifdef DEBUG
-	cout << "Starting main()" << endl;
-#endif
-	main();
-	writeConfig();
-	if (fwType=="open2x") writeConfigOpen2x();
-
-	quit();
-	exit(0);
 }
 
 GMenu2X::~GMenu2X() {
-	free(menu);
-	free(s);
-	free(font);
+	if (PowerSaver::isRunning())
+		delete PowerSaver::getInstance();
+	quit();
+
+	delete menu;
+	delete font;
 }
 
 void GMenu2X::quit() {
 	fflush(NULL);
 	sc.clear();
-	s->free();
+	delete s;
+
 	SDL_Quit();
-#ifdef TARGET_GP2X
+	unsetenv("SDL_FBCON_DONT_CLEAR");
+
+#ifdef PLATFORM_GP2X
 /*	if (gp2x_mem!=0) {
 		//Fix tv-out
 		if (gp2x_memregs[0x2800>>1]&0x100) {
 			gp2x_memregs[0x2906>>1]=512;
 			gp2x_memregs[0x28E4>>1]=gp2x_memregs[0x290C>>1];
 		}
-		gp2x_deinit();
 	}*/
 #endif
+	deinit();
 }
 
 void GMenu2X::initBG() {
 	sc.del("bgmain");
 
-	if (bg != NULL) free(bg);
-
-	if (!fileExists(confStr["wallpaper"])) {
-		bg = new Surface(s);
-		bg->box(0,0,resX,resY,0,0,0);
-	} else {
-		bg = new Surface(confStr["wallpaper"],false);
+	// Load wallpaper.
+	delete bg;
+	bg = Surface::loadImage(confStr["wallpaper"]);
+	if (!bg) {
+		bg = Surface::emptySurface(resX, resY);
 	}
 
 	drawTopBar(bg);
@@ -331,50 +489,66 @@ void GMenu2X::initBG() {
 	Surface *bgmain = new Surface(bg);
 	sc.add(bgmain,"bgmain");
 
-	Surface sd("imgs/sd.png", confStr["skin"]);
-	Surface cpu("imgs/cpu.png", confStr["skin"]);
-	Surface volume("imgs/volume.png", confStr["skin"]);
-	string df = getDiskFree();
+	Surface *sd = Surface::loadImage("imgs/sd.png", confStr["skin"]);
+	if (sd) sd->blit(bgmain, 3, bottomBarIconY);
 
-	sd.blit( sc["bgmain"], 3, bottomBarIconY );
-	sc["bgmain"]->write( font, df, 22, bottomBarTextY, SFontHAlignLeft, SFontVAlignMiddle );
+#ifdef PLATFORM_DINGUX || PLATFORM_SPICA
+	string df = getDiskFree("/boot");
+#else
+	string df = getDiskFree(CARD_ROOT);
+#endif
+	bgmain->write(font, df, 22, bottomBarTextY, ASFont::HAlignLeft, ASFont::VAlignMiddle);
+	delete sd;
+
+	Surface *volume = Surface::loadImage("imgs/volume.png", confStr["skin"]);
 	volumeX = 27+font->getTextWidth(df);
-	volume.blit( sc["bgmain"], volumeX, bottomBarIconY );
+	if (volume) volume->blit(bgmain, volumeX, bottomBarIconY);
 	volumeX += 19;
+	delete volume;
+
+	Surface *cpu = Surface::loadImage("imgs/cpu.png", confStr["skin"]);
 	cpuX = volumeX+font->getTextWidth("100")+5;
-	cpu.blit( sc["bgmain"], cpuX, bottomBarIconY );
+	if (cpu) cpu->blit(bgmain, cpuX, bottomBarIconY);
 	cpuX += 19;
-	manualX = cpuX+font->getTextWidth("300Mhz")+5;
+	manualX = cpuX+font->getTextWidth("300MHz")+5;
+	delete cpu;
 
 	int serviceX = resX-38;
 	if (usbnet) {
 		if (web) {
-			Surface webserver("imgs/webserver.png", confStr["skin"]);
-			webserver.blit( sc["bgmain"], serviceX, bottomBarIconY );
+			Surface *webserver = Surface::loadImage(
+				"imgs/webserver.png", confStr["skin"]);
+			if (webserver) webserver->blit(bgmain, serviceX, bottomBarIconY);
 			serviceX -= 19;
+			delete webserver;
 		}
 		if (samba) {
-			Surface sambaS("imgs/samba.png", confStr["skin"]);
-			sambaS.blit( sc["bgmain"], serviceX, bottomBarIconY );
+			Surface *sambaS = Surface::loadImage(
+				"imgs/samba.png", confStr["skin"]);
+			if (sambaS) sambaS->blit(bgmain, serviceX, bottomBarIconY);
 			serviceX -= 19;
+			delete sambaS;
 		}
 		if (inet) {
-			Surface inetS("imgs/inet.png", confStr["skin"]);
-			inetS.blit( sc["bgmain"], serviceX, bottomBarIconY );
+			Surface *inetS = Surface::loadImage("imgs/inet.png", confStr["skin"]);
+			if (inetS) inetS->blit(bgmain, serviceX, bottomBarIconY);
 			serviceX -= 19;
+			delete inetS;
 		}
 	}
+
+	bgmain->convertToDisplayFormat();
 }
 
 void GMenu2X::initFont() {
 	if (font != NULL) {
-		free(font);
+		delete font;
 		font = NULL;
 	}
 
 	string fontFile = sc.getSkinFilePath("imgs/font.png");
 	if (fontFile.empty()) {
-		cout << "Font png not found!" << endl;
+		ERROR("Font png not found!\n");
 		quit();
 		exit(-1);
 	}
@@ -384,27 +558,27 @@ void GMenu2X::initFont() {
 void GMenu2X::initMenu() {
 	//Menu structure handler
 	menu = new Menu(this);
-	for (uint i=0; i<menu->sections.size(); i++) {
+	for (uint i=0; i<menu->getSections().size(); i++) {
 		//Add virtual links in the applications section
-		if (menu->sections[i]=="applications") {
+		if (menu->getSections()[i]=="applications") {
 			menu->addActionLink(i,"Explorer",MakeDelegate(this,&GMenu2X::explorer),tr["Launch an application"],"skin:icons/explorer.png");
 		}
 
 		//Add virtual links in the setting section
-		else if (menu->sections[i]=="settings") {
+		else if (menu->getSections()[i]=="settings") {
 			menu->addActionLink(i,"GMenu2X",MakeDelegate(this,&GMenu2X::options),tr["Configure GMenu2X's options"],"skin:icons/configure.png");
-			if (fwType=="open2x")
-				menu->addActionLink(i,"Open2x",MakeDelegate(this,&GMenu2X::settingsOpen2x),tr["Configure Open2x system settings"],"skin:icons/o2xconfigure.png");
 			menu->addActionLink(i,tr["Skin"],MakeDelegate(this,&GMenu2X::skinMenu),tr["Configure skin"],"skin:icons/skin.png");
 			menu->addActionLink(i,tr["Wallpaper"],MakeDelegate(this,&GMenu2X::changeWallpaper),tr["Change GMenu2X wallpaper"],"skin:icons/wallpaper.png");
-#ifdef TARGET_GP2X
+#ifdef PLATFORM_GP2X
+			if (fwType=="open2x")
+				menu->addActionLink(i,"Open2x",MakeDelegate(this,&GMenu2X::settingsOpen2x),tr["Configure Open2x system settings"],"skin:icons/o2xconfigure.png");
 /*			menu->addActionLink(i,"TV",MakeDelegate(this,&GMenu2X::toggleTvOut),tr["Activate/deactivate tv-out"],"skin:icons/tv.png");
 			menu->addActionLink(i,"USB Sd",MakeDelegate(this,&GMenu2X::activateSdUsb),tr["Activate Usb on SD"],"skin:icons/usb.png");
 			if (fwType=="gph" && !f200)
 				menu->addActionLink(i,"USB Nand",MakeDelegate(this,&GMenu2X::activateNandUsb),tr["Activate Usb on Nand"],"skin:icons/usb.png");
 			//menu->addActionLink(i,"USB Root",MakeDelegate(this,&GMenu2X::activateRootUsb),tr["Activate Usb on the root of the Gp2x Filesystem"],"skin:icons/usb.png");*/
 #endif
-			if (fileExists(path+"log.txt"))
+			if (fileExists(getHome()+"/log.txt"))
 				menu->addActionLink(i,tr["Log Viewer"],MakeDelegate(this,&GMenu2X::viewLog),tr["Displays last launched program's output"],"skin:icons/ebook.png");
 			menu->addActionLink(i,tr["About"],MakeDelegate(this,&GMenu2X::about),tr["Info about GMenu2X"],"skin:icons/about.png");
 		}
@@ -416,7 +590,7 @@ void GMenu2X::initMenu() {
 	menu->loadIcons();
 
 	//DEBUG
-	//menu->addLink( "/boot/local/", "sample.pxml", "applications" );
+	//menu->addLink( CARD_ROOT, "sample.pxml", "applications" );
 }
 
 void GMenu2X::about() {
@@ -470,7 +644,7 @@ and all the anonymous donors...\n\
 }
 
 void GMenu2X::viewLog() {
-	string logfile = path+"log.txt";
+	string logfile = getHome()+"/log.txt";
 	if (fileExists(logfile)) {
 		ifstream inf(logfile.c_str(), ios_base::in);
 		if (inf.is_open()) {
@@ -485,9 +659,9 @@ void GMenu2X::viewLog() {
 			td.exec();
 
 			MessageBox mb(this, tr["Do you want to delete the log file?"], "icons/ebook.png");
-			mb.buttons[ACTION_B] = tr["Yes"];
-			mb.buttons[ACTION_X] = tr["No"];
-			if (mb.exec() == ACTION_B) {
+			mb.setButton(ACCEPT, tr["Yes"]);
+			mb.setButton(CANCEL, tr["No"]);
+			if (mb.exec() == ACCEPT) {
 				ledOn();
 				unlink(logfile.c_str());
 				sync();
@@ -499,7 +673,14 @@ void GMenu2X::viewLog() {
 }
 
 void GMenu2X::readConfig() {
-	string conffile = path+"gmenu2x.conf";
+	string conffile = GMENU2X_SYSTEM_DIR "/gmenu2x.conf";
+	readConfig(conffile);
+
+	conffile = getHome() + "/gmenu2x.conf";
+	readConfig(conffile);
+}
+
+void GMenu2X::readConfig(string conffile) {
 	if (fileExists(conffile)) {
 		ifstream inf(conffile.c_str(), ios_base::in);
 		if (inf.is_open()) {
@@ -517,16 +698,23 @@ void GMenu2X::readConfig() {
 			inf.close();
 		}
 	}
-	if (!confStr["lang"].empty()) tr.setLang(confStr["lang"]);
-	if (!confStr["wallpaper"].empty() && !fileExists(confStr["wallpaper"])) confStr["wallpaper"] = "";
-	if (confStr["skin"].empty() || !fileExists("skins/"+confStr["skin"])) confStr["skin"] = "Default";
+	if (!confStr["lang"].empty())
+		tr.setLang(confStr["lang"]);
+
+	if (!confStr["wallpaper"].empty() && !fileExists(confStr["wallpaper"]))
+		confStr["wallpaper"] = "";
+
+	if (confStr["skin"].empty() || SurfaceCollection::getSkinPath(confStr["skin"]).empty())
+		confStr["skin"] = "Default";
 
 	evalIntConf( &confInt["outputLogs"], 0, 0,1 );
-	evalIntConf( &confInt["maxClock"], 430, 200,430 );
-	evalIntConf( &confInt["menuClock"], 200, 200,430 );
+	evalIntConf( &confInt["maxClock"],
+				 cpuFreqSafeMax, cpuFreqMin, cpuFreqMax );
+	evalIntConf( &confInt["menuClock"],
+				 cpuFreqMenuDefault, cpuFreqMin, cpuFreqSafeMax );
 	evalIntConf( &confInt["globalVolume"], 67, 0,100 );
-	evalIntConf( &confInt["backlight"], 100, 5,100 );
-	evalIntConf( &confInt["videoBpp"], 16, 8,32 );
+	evalIntConf( &confInt["backlightTimeout"], 15, 0,120 );
+	evalIntConf( &confInt["videoBpp"], 32, 16, 32 );
 
 	if (confStr["tvoutEncoding"] != "PAL") confStr["tvoutEncoding"] = "NTSC";
 	resX = constrain( confInt["resolutionX"], 320,1920 );
@@ -535,7 +723,7 @@ void GMenu2X::readConfig() {
 
 void GMenu2X::writeConfig() {
 	ledOn();
-	string conffile = path+"gmenu2x.conf";
+	string conffile = getHome() + "/gmenu2x.conf";
 	ofstream inf(conffile.c_str());
 	if (inf.is_open()) {
 		ConfStrHash::iterator endS = confStr.end();
@@ -552,7 +740,7 @@ void GMenu2X::writeConfig() {
 	ledOff();
 }
 
-
+#ifdef PLATFORM_GP2X
 void GMenu2X::readConfigOpen2x() {
 	string conffile = "/etc/config/open2x.conf";
 	if (fileExists(conffile)) {
@@ -601,10 +789,19 @@ void GMenu2X::writeConfigOpen2x() {
 	}
 	ledOff();
 }
+#endif
 
 void GMenu2X::writeSkinConfig() {
 	ledOn();
-	string conffile = path+"skins/"+confStr["skin"]+"/skin.conf";
+
+	string conffile = getHome() + "/skins/";
+	if (!fileExists(conffile))
+	  mkdir(conffile.c_str(), 0770);
+	conffile = conffile + confStr["skin"];
+	if (!fileExists(conffile))
+	  mkdir(conffile.c_str(), 0770);
+	conffile = conffile + "/skin.conf";
+
 	ofstream inf(conffile.c_str());
 	if (inf.is_open()) {
 		ConfStrHash::iterator endS = skinConfStr.end();
@@ -615,9 +812,18 @@ void GMenu2X::writeSkinConfig() {
 		for(ConfIntHash::iterator curr = skinConfInt.begin(); curr != endI; curr++)
 			inf << curr->first << "=" << curr->second << endl;
 
-		ConfRGBAHash::iterator endC = skinConfColors.end();
-		for(ConfRGBAHash::iterator curr = skinConfColors.begin(); curr != endC; curr++)
-			inf << curr->first << "=#" << hex << curr->second.r << hex << curr->second.g << hex << curr->second.b << hex << curr->second.a << endl;
+		int i;
+		for (i = 0; i < NUM_COLORS; ++i) {
+			inf << colorToString((enum color)i) << "=#";
+			inf.width(2); inf.fill('0');
+			inf << right << hex << skinConfColors[i].r;
+			inf.width(2); inf.fill('0');
+			inf << right << hex << skinConfColors[i].g;
+			inf.width(2); inf.fill('0');
+			inf << right << hex << skinConfColors[i].b;
+			inf.width(2); inf.fill('0');
+			inf << right << hex << skinConfColors[i].a << endl;
+		}
 
 		inf.close();
 		sync();
@@ -625,6 +831,7 @@ void GMenu2X::writeSkinConfig() {
 	ledOff();
 }
 
+#ifdef PLATFORM_GP2X
 void GMenu2X::readCommonIni() {
 	if (fileExists("/usr/gp2x/common.ini")) {
 		ifstream inf("/usr/gp2x/common.ini", ios_base::in);
@@ -662,6 +869,7 @@ void GMenu2X::readCommonIni() {
 }
 
 void GMenu2X::writeCommonIni() {}
+#endif
 
 void GMenu2X::readTmp() {
 	lastSelectorElement = -1;
@@ -689,7 +897,7 @@ void GMenu2X::readTmp() {
 	}
 }
 
-void GMenu2X::writeTmp(int selelem, string selectordir) {
+void GMenu2X::writeTmp(int selelem, const string &selectordir) {
 	string conffile = "/tmp/gmenu2x.tmp";
 	ofstream inf(conffile.c_str());
 	if (inf.is_open()) {
@@ -705,7 +913,7 @@ void GMenu2X::writeTmp(int selelem, string selectordir) {
 }
 
 void GMenu2X::initServices() {
-#ifdef TARGET_GP2X
+#ifdef PLATFORM_GP2X
 /*	if (usbnet) {
 		string services = "scripts/services.sh "+ip+" "+(inet?"on":"off")+" "+(samba?"on":"off")+" "+(web?"on":"off")+" &";
 		system(services.c_str());
@@ -714,14 +922,14 @@ void GMenu2X::initServices() {
 }
 
 void GMenu2X::ledOn() {
-#ifdef TARGET_GP2X
+#ifdef PLATFORM_GP2X
 //	if (gp2x_mem!=0 && !f200) gp2x_memregs[0x106E >> 1] ^= 16;
 	//SDL_SYS_JoystickGp2xSys(joy.joystick, BATT_LED_ON);
 #endif
 }
 
 void GMenu2X::ledOff() {
-#ifdef TARGET_GP2X
+#ifdef PLATFORM_GP2X
 //	if (gp2x_mem!=0 && !f200) gp2x_memregs[0x106E >> 1] ^= 16;
 	//SDL_SYS_JoystickGp2xSys(joy.joystick, BATT_LED_OFF);
 #endif
@@ -729,45 +937,38 @@ void GMenu2X::ledOff() {
 
 void GMenu2X::setBacklight(int val)
 {
-	if ((val >= 0) && (val <=100))
-	{
-		if (backlightHandle)
-		{
-			stringstream valsstr;
-			string valstr = "";
-			if (val < 10) 
-				valsstr << "00";
-			else if (val < 100)
-				valsstr << "0" ;
-			valsstr << val;
-			valsstr >> valstr;
-			fprintf(backlightHandle,"%s",valstr.c_str());
-			rewind(backlightHandle);
-		}
+	if (backlightHandle) {
+		fprintf(backlightHandle, "%d", (val * 255) / 100);
+		fflush(backlightHandle);
+		rewind(backlightHandle);
 	}
 }
 
 int GMenu2X::getBackLight()
 {
-	int val = 100;
-	if (backlightHandle)
-	{
-		char valcstring[4];
-		fscanf(backlightHandle,"%s",&valcstring);
+	int val = 255;
+	if (backlightHandle) {
+		fscanf(backlightHandle, "%d", &val);
 		rewind(backlightHandle);
-		val = atoi(valcstring);
+		val = (val * 100) / 255;
+		if (val < 0) val = 0; else if (val > 100) val = 100;
 	}
 	return val;
 }
 
-int GMenu2X::main() {
+void GMenu2X::main() {
 	uint linksPerPage = linkColumns*linkRows;
 	int linkSpacingX = (resX-10 - linkColumns*skinConfInt["linkWidth"])/linkColumns;
 	int linkSpacingY = (resY-35 - skinConfInt["topBarHeight"] - linkRows*skinConfInt["linkHeight"])/linkRows;
 	uint sectionLinkPadding = (skinConfInt["topBarHeight"] - 32 - font->getLineHeight()) / 3;
 
 	bool quit = false;
-	int x,y, offset = menu->sectionLinks()->size()>linksPerPage ? 2 : 6, helpBoxHeight = fwType=="open2x" ? 154 : 139;
+	int x,y, offset = menu->sectionLinks()->size()>linksPerPage ? 2 : 6;
+#ifdef PLATFORM_GP2X
+	int helpBoxHeight = fwType=="open2x" ? 154 : 139;
+#else
+	int helpBoxHeight = 154;
+#endif
 	uint i;
 	long tickBattery = -60000, tickNow;
 	string batteryIcon = "imgs/battery/0.png";
@@ -775,16 +976,19 @@ int GMenu2X::main() {
 	uint sectionsCoordX = 24;
 	SDL_Rect re = {0,0,0,0};
 	bool helpDisplayed = false;
-#ifdef DEBUG
+#ifdef WITH_DEBUG
 	//framerate
 	long tickFPS = SDL_GetTicks();
 	int drawn_frames = 0;
 	string fps = "";
 #endif
-	
+
 	IconButton btnContextMenu(this,"skin:imgs/menu.png");
 	btnContextMenu.setPosition(resX-38, bottomBarIconY);
 	btnContextMenu.setAction(MakeDelegate(this, &GMenu2X::contextMenu));
+
+	if (!fileExists(CARD_ROOT))
+		CARD_ROOT = "/";
 
 	while (!quit) {
 		tickNow = SDL_GetTicks();
@@ -793,26 +997,27 @@ int GMenu2X::main() {
 		sc["bgmain"]->blit(s,0,0);
 
 		//Sections
-		sectionsCoordX = halfX - (constrain((uint)menu->sections.size(), 0 , linkColumns) * skinConfInt["linkWidth"]) / 2;
+		sectionsCoordX = halfX - (constrain((uint)menu->getSections().size(), 0 , linkColumns) * skinConfInt["linkWidth"]) / 2;
 		if (menu->firstDispSection()>0)
 			sc.skinRes("imgs/l_enabled.png")->blit(s,0,0);
 		else
 			sc.skinRes("imgs/l_disabled.png")->blit(s,0,0);
-		if (menu->firstDispSection()+linkColumns<menu->sections.size())
+		if (menu->firstDispSection()+linkColumns<menu->getSections().size())
 			sc.skinRes("imgs/r_enabled.png")->blit(s,resX-10,0);
 		else
 			sc.skinRes("imgs/r_disabled.png")->blit(s,resX-10,0);
-		for (i=menu->firstDispSection(); i<menu->sections.size() && i<menu->firstDispSection()+linkColumns; i++) {
-			string sectionIcon = "skin:sections/"+menu->sections[i]+".png";
+		for (i=menu->firstDispSection(); i<menu->getSections().size() && i<menu->firstDispSection()+linkColumns; i++) {
+			string sectionIcon = "skin:sections/"+menu->getSections()[i]+".png";
 			x = (i-menu->firstDispSection())*skinConfInt["linkWidth"]+sectionsCoordX;
 			if (menu->selSectionIndex()==(int)i)
-				s->box(x, 0, skinConfInt["linkWidth"], skinConfInt["topBarHeight"], skinConfColors["selectionBg"]);
+				s->box(x, 0, skinConfInt["linkWidth"],
+				skinConfInt["topBarHeight"], skinConfColors[COLOR_SELECTION_BG]);
 			x += skinConfInt["linkWidth"]/2;
 			if (sc.exists(sectionIcon))
 				sc[sectionIcon]->blit(s,x-16,sectionLinkPadding,32,32);
 			else
 				sc.skinRes("icons/section.png")->blit(s,x-16,sectionLinkPadding);
-			s->write( font, menu->sections[i], x, skinConfInt["topBarHeight"]-sectionLinkPadding, SFontHAlignCenter, SFontVAlignBottom );
+			s->write( font, menu->getSections()[i], x, skinConfInt["topBarHeight"]-sectionLinkPadding, ASFont::HAlignCenter, ASFont::VAlignBottom );
 		}
 
 		//Links
@@ -832,24 +1037,26 @@ int GMenu2X::main() {
 
 		drawScrollBar(linkRows,menu->sectionLinks()->size()/linkColumns + ((menu->sectionLinks()->size()%linkColumns==0) ? 0 : 1),menu->firstDispRow(),43,resY-81);
 
+        /*
 		switch(volumeMode) {
 			case VOLUME_MODE_MUTE:   sc.skinRes("imgs/mute.png")->blit(s,279,bottomBarIconY); break;
 			case VOLUME_MODE_PHONES: sc.skinRes("imgs/phones.png")->blit(s,279,bottomBarIconY); break;
 			default: sc.skinRes("imgs/volume.png")->blit(s,279,bottomBarIconY); break;
 		}
+        */
 
 		if (menu->selLink()!=NULL) {
-			s->write ( font, menu->selLink()->getDescription(), halfX, resY-19, SFontHAlignCenter, SFontVAlignBottom );
+			s->write ( font, menu->selLink()->getDescription(), halfX, resY-19, ASFont::HAlignCenter, ASFont::VAlignBottom );
 			if (menu->selLinkApp()!=NULL) {
-				s->write ( font, menu->selLinkApp()->clockStr(confInt["maxClock"]), cpuX, bottomBarTextY, SFontHAlignLeft, SFontVAlignMiddle );
-				s->write ( font, menu->selLinkApp()->volumeStr(), volumeX, bottomBarTextY, SFontHAlignLeft, SFontVAlignMiddle );
+				s->write ( font, menu->selLinkApp()->clockStr(confInt["maxClock"]), cpuX, bottomBarTextY, ASFont::HAlignLeft, ASFont::VAlignMiddle );
+				s->write ( font, menu->selLinkApp()->volumeStr(), volumeX, bottomBarTextY, ASFont::HAlignLeft, ASFont::VAlignMiddle );
 				//Manual indicator
 				if (!menu->selLinkApp()->getManual().empty())
 					sc.skinRes("imgs/manual.png")->blit(s,manualX,bottomBarIconY);
 			}
 		}
 
-		if (f200) {
+		if (ts.initialized()) {
 			btnContextMenu.paint();
 		}
 		//check battery status every 60 seconds
@@ -869,25 +1076,35 @@ int GMenu2X::main() {
 		//s->write( font, tr[batstr.c_str()], 20, 170 );
 		//On Screen Help
 
-		if(input[ACTION_A] )
-			helpDisplayed = ! helpDisplayed;
-				
+
 		if (helpDisplayed) {
-			s->box(10,50,300,143, skinConfColors["messageBoxBg"]);
-			s->rectangle( 12,52,296,helpBoxHeight, skinConfColors["messageBoxBorder"] );
+			s->box(10,50,300,helpBoxHeight+4, skinConfColors[COLOR_MESSAGE_BOX_BG]);
+			s->rectangle( 12,52,296,helpBoxHeight,
+			skinConfColors[COLOR_MESSAGE_BOX_BORDER] );
 			s->write( font, tr["CONTROLS"], 20, 60 );
+#ifdef PLATFORM_DINGUX || PLATFORM_SPICA
+			s->write( font, tr["A: Launch link / Confirm action"], 20, 80 );
+			s->write( font, tr["B: Show this help menu"], 20, 95 );
+			s->write( font, tr["L, R: Change section"], 20, 110 );
+			s->write( font, tr["SELECT: Show contextual menu"], 20, 155 );
+			s->write( font, tr["START: Show options menu"], 20, 170 );
+#endif
+#ifdef PLATFORM_GP2X
 			s->write( font, tr["B, Stick press: Launch link / Confirm action"], 20, 80 );
 			s->write( font, tr["L, R: Change section"], 20, 95 );
-			s->write( font, tr["Y: Show manual/readme"], 20, 110 );
 			s->write( font, tr["VOLUP, VOLDOWN: Change cpu clock"], 20, 125 );
 			s->write( font, tr["A+VOLUP, A+VOLDOWN: Change volume"], 20, 140 );
 			s->write( font, tr["SELECT: Show contextual menu"], 20, 155 );
 			s->write( font, tr["START: Show options menu"], 20, 170 );
 			if (fwType=="open2x") s->write( font, tr["X: Toggle speaker mode"], 20, 185 );
-			
+#endif
+			s->flip();
+			while (input.waitForPressedButton() != CANCEL) {}
+			helpDisplayed=false;
+			continue;
 		}
 
-#ifdef DEBUG
+#ifdef WITH_DEBUG
 		//framerate
 		drawn_frames++;
 		if (tickNow-tickFPS>=1000) {
@@ -897,20 +1114,20 @@ int GMenu2X::main() {
 			tickFPS = tickNow;
 			drawn_frames = 0;
 		}
-		s->write( font, fps+" FPS", resX-1,1 ,SFontHAlignRight );
+		s->write( font, fps+" FPS", resX-1,1 ,ASFont::HAlignRight );
 #endif
 
 		s->flip();
 
 		//touchscreen
-		if (f200) {
+		if (ts.initialized()) {
 			ts.poll();
 			btnContextMenu.handleTS();
 			re.x = 0; re.y = 0; re.h = skinConfInt["topBarHeight"]; re.w = resX;
 			if (ts.pressed() && ts.inRect(re)) {
 				re.w = skinConfInt["linkWidth"];
-				for (i=menu->firstDispSection(); !ts.handled() && i<menu->sections.size() && i<menu->firstDispSection()+linkColumns; i++) {
-					sectionsCoordX = halfX - (constrain((uint)(linkColumns-menu->sections.size()), 0 , linkColumns) * skinConfInt["linkWidth"]) / 2;
+				sectionsCoordX = halfX - (constrain((uint)menu->getSections().size(), 0 , linkColumns) * skinConfInt["linkWidth"]) / 2;
+				for (i=menu->firstDispSection(); !ts.handled() && i<menu->getSections().size() && i<menu->firstDispSection()+linkColumns; i++) {
 					re.x = (i-menu->firstDispSection())*re.w+sectionsCoordX;
 
 					if (ts.inRect(re)) {
@@ -930,14 +1147,51 @@ int GMenu2X::main() {
 			}
 		}
 
-//#ifdef TARGET_GP2X
+        switch (input.waitForPressedButton()) {
+            case ACCEPT:
+                if (menu->selLink() != NULL) menu->selLink()->run();
+                break;
+            case CANCEL:
+                helpDisplayed=true;
+                break;
+            case SETTINGS:
+                options();
+                break;
+            case MENU:
+                contextMenu();
+                break;
+            case UP:
+                menu->linkUp();
+                break;
+            case DOWN:
+                menu->linkDown();
+                break;
+            case LEFT:
+                menu->linkLeft();
+                break;
+            case RIGHT:
+                menu->linkRight();
+                break;
+            case ALTLEFT:
+				menu->decSectionIndex();
+				offset = menu->sectionLinks()->size()>linksPerPage ? 2 : 6;
+                break;
+            case ALTRIGHT:
+				menu->incSectionIndex();
+				offset = menu->sectionLinks()->size()>linksPerPage ? 2 : 6;
+                break;
+            default:
+                break;
+        }
+
+        /*
 		while (!input.update())
 			usleep(LOOP_DELAY);
-		if ( input[ACTION_B] && menu->selLink()!=NULL ) menu->selLink()->run();
-		else if ( input[ACTION_START]  ) options();
-		else if ( input[ACTION_SELECT] ) contextMenu();
+		if ( input[ACCEPT] && menu->selLink()!=NULL ) menu->selLink()->run();
+		else if ( input[SETTINGS]  ) options();
+		else if ( input[MENU] ) contextMenu();
 		// VOLUME SCALE MODIFIER
-		else if ( fwType=="open2x" && input[ACTION_X] ) {
+		else if ( fwType=="open2x" && input[CLEAR] ) {
 			volumeMode = constrain(volumeMode-1, -VOLUME_MODE_MUTE-1, VOLUME_MODE_NORMAL);
 			if(volumeMode < VOLUME_MODE_MUTE)
 				volumeMode = VOLUME_MODE_NORMAL;
@@ -949,65 +1203,66 @@ int GMenu2X::main() {
 			setVolume(confInt["globalVolume"]);
 		}
 		// LINK NAVIGATION
-		else if ( input[ACTION_LEFT ]  ) menu->linkLeft();
-		else if ( input[ACTION_RIGHT]  ) menu->linkRight();
-		else if ( input[ACTION_UP   ]  ) menu->linkUp();
-		else if ( input[ACTION_DOWN ]  ) menu->linkDown();
+		else if ( input[ALTLEFTEFT ]  ) menu->linkLeft();
+		else if ( input[ALTRIGHTIGHT]  ) menu->linkRight();
+		else if ( input[UP   ]  ) menu->linkUp();
+		else if ( input[DOWN ]  ) menu->linkDown();
 		// SELLINKAPP SELECTED
 		else if (menu->selLinkApp()!=NULL) {
-			if ( input[ACTION_Y] ) menu->selLinkApp()->showManual();
-			else if ( input.isActive(ACTION_A) ) {
+			if ( input[MANUAL] ) menu->selLinkApp()->showManual();
+			else if ( input.isActive(CANCEL) ) {
 				// VOLUME
-				if ( input[ACTION_VOLDOWN] && !input.isActive(ACTION_VOLUP) )
+				if ( input[VOLDOWN] && !input.isActive(VOLUP) )
 					menu->selLinkApp()->setVolume( constrain(menu->selLinkApp()->volume()-1,0,100) );
-				if ( input[ACTION_VOLUP] && !input.isActive(ACTION_VOLDOWN) )
+				if ( input[VOLUP] && !input.isActive(VOLDOWN) )
 					menu->selLinkApp()->setVolume( constrain(menu->selLinkApp()->volume()+1,0,100) );;
-				if ( input.isActive(ACTION_VOLUP) && input.isActive(ACTION_VOLDOWN) ) menu->selLinkApp()->setVolume(-1);
+				if ( input.isActive(VOLUP) && input.isActive(VOLDOWN) ) menu->selLinkApp()->setVolume(-1);
 			} else {
 				// CLOCK
-				if ( input[ACTION_VOLDOWN] && !input.isActive(ACTION_VOLUP) )
+				if ( input[VOLDOWN] && !input.isActive(VOLUP) )
 					menu->selLinkApp()->setClock( constrain(menu->selLinkApp()->clock()-1,200,confInt["maxClock"]) );
-				if ( input[ACTION_VOLUP] && !input.isActive(ACTION_VOLDOWN) )
+				if ( input[VOLUP] && !input.isActive(VOLDOWN) )
 					menu->selLinkApp()->setClock( constrain(menu->selLinkApp()->clock()+1,200,confInt["maxClock"]) );
-				if ( input.isActive(ACTION_VOLUP) && input.isActive(ACTION_VOLDOWN) ) menu->selLinkApp()->setClock(336);
+				if ( input.isActive(VOLUP) && input.isActive(VOLDOWN) ) menu->selLinkApp()->setClock(336);
 			}
 		}
-		if ( input.isActive(ACTION_A) ) {
-			if (input.isActive(ACTION_L) && input.isActive(ACTION_R))
+		if ( input.isActive(CANCEL) ) {
+			if (input.isActive(ALTLEFT) && input.isActive(ALTRIGHT))
 				saveScreenshot();
 		} else {
 			// SECTIONS
-			if ( input[ACTION_L     ] ) {
+			if ( input[ALTLEFT     ] ) {
 				menu->decSectionIndex();
 				offset = menu->sectionLinks()->size()>linksPerPage ? 2 : 6;
-			} else if ( input[ACTION_R     ] ) {
+			} else if ( input[ALTRIGHT     ] ) {
 				menu->incSectionIndex();
 				offset = menu->sectionLinks()->size()>linksPerPage ? 2 : 6;
 			}
 		}
+        */
 	}
-
-	return -1;
 }
 
 void GMenu2X::explorer() {
-	FileDialog fd(this,tr["Select an application"],".gpu,.dge,.sh");
+	FileDialog fd(this,tr["Select an application"],".gpu,.dge,.sh,");
 	if (fd.exec()) {
 		if (confInt["saveSelection"] && (confInt["section"]!=menu->selSectionIndex() || confInt["link"]!=menu->selLinkIndex()))
 			writeConfig();
+#ifdef PLATFORM_GP2X
 		if (fwType == "open2x" && savedVolumeMode != volumeMode)
 			writeConfigOpen2x();
+#endif
 
 		//string command = cmdclean(fd.path()+"/"+fd.file) + "; sync & cd "+cmdclean(getExePath())+"; exec ./gmenu2x";
-		string command = cmdclean(fd.path()+"/"+fd.file);
-		chdir(fd.path().c_str());
+		string command = cmdclean(fd.getPath()+"/"+fd.getFile());
+		chdir(fd.getPath().c_str());
 		quit();
-		setClock(200);
+		setClock(cpuFreqAppDefault);
 		execlp("/bin/sh","/bin/sh","-c",command.c_str(),NULL);
 
 		//if execution continues then something went wrong and as we already called SDL_Quit we cannot continue
 		//try relaunching gmenu2x
-		fprintf(stderr, "Error executing selected application, re-launching gmenu2x\n");
+		ERROR("Error executing selected application, re-launching gmenu2x\n");
 		chdir(getExePath().c_str());
 		execlp("./gmenu2x", "./gmenu2x", NULL);
 	}
@@ -1017,47 +1272,65 @@ void GMenu2X::options() {
 	int curMenuClock = confInt["menuClock"];
 	int curGlobalVolume = confInt["globalVolume"];
 	//G
-	int prevbacklight = confInt["backlight"];
-	bool showRootFolder = fileExists("/boot/local");
+	int oldBacklight = getBackLight();
+	int newBacklight = oldBacklight;
+	bool showRootFolder = fileExists(CARD_ROOT);
 
-	FileLister fl_tr("translations");
+	FileLister fl_tr(getHome() + "/translations");
 	fl_tr.browse();
-	fl_tr.files.insert(fl_tr.files.begin(),"English");
+	fl_tr.setPath(GMENU2X_SYSTEM_DIR "/translations", false);
+	fl_tr.browse(false);
+
+	fl_tr.insertFile("English");
 	string lang = tr.lang();
 
 	vector<string> encodings;
 	encodings.push_back("NTSC");
 	encodings.push_back("PAL");
 
-	SettingsDialog sd(this,tr["Settings"]);
-	sd.addSetting(new MenuSettingMultiString(this,tr["Language"],tr["Set the language used by GMenu2X"],&lang,&fl_tr.files));
+	SettingsDialog sd(this, input, ts, tr["Settings"]);
+	sd.addSetting(new MenuSettingMultiString(this,tr["Language"],tr["Set the language used by GMenu2X"],&lang,&fl_tr.getFiles()));
 	sd.addSetting(new MenuSettingBool(this,tr["Save last selection"],tr["Save the last selected link and section on exit"],&confInt["saveSelection"]));
-	sd.addSetting(new MenuSettingInt(this,tr["Clock for GMenu2X"],tr["Set the cpu working frequency when running GMenu2X"],&confInt["menuClock"],200,430));
-	sd.addSetting(new MenuSettingInt(this,tr["Maximum overclock"],tr["Set the maximum overclock for launching links"],&confInt["maxClock"],200,430));
+	sd.addSetting(new MenuSettingInt(this,tr["Clock for GMenu2X"],tr["Set the cpu working frequency when running GMenu2X"],&confInt["menuClock"],cpuFreqMin,cpuFreqSafeMax,cpuFreqMultiple));
+	sd.addSetting(new MenuSettingInt(this,tr["Maximum overclock"],tr["Set the maximum overclock for launching links"],&confInt["maxClock"],cpuFreqMin,cpuFreqMax,cpuFreqMultiple));
 	sd.addSetting(new MenuSettingInt(this,tr["Global Volume"],tr["Set the default volume for the gp2x soundcard"],&confInt["globalVolume"],0,100));
 	sd.addSetting(new MenuSettingBool(this,tr["Output logs"],tr["Logs the output of the links. Use the Log Viewer to read them."],&confInt["outputLogs"]));
 	//G
-	sd.addSetting(new MenuSettingInt(this,tr["Lcd Backlight"],tr["Set dingoo's Lcd Backlight value (default: 100)"],&confInt["backlight"],5,100));
+	sd.addSetting(new MenuSettingInt(this,tr["Lcd Backlight"],tr["Set dingoo's Lcd Backlight value (default: 100)"],&newBacklight,5,100));
+	sd.addSetting(new MenuSettingInt(this,tr["Screen Timeout"],tr["Set screen's backlight timeout in seconds"],&confInt["backlightTimeout"],0,120));
 //	sd.addSetting(new MenuSettingMultiString(this,tr["Tv-Out encoding"],tr["Encoding of the tv-out signal"],&confStr["tvoutEncoding"],&encodings));
 	sd.addSetting(new MenuSettingBool(this,tr["Show root"],tr["Show root folder in the file selection dialogs"],&showRootFolder));
 
 	if (sd.exec() && sd.edited()) {
 		//G
-		if (prevbacklight != confInt["backlight"]) setBacklight(confInt["backlight"]);
+		if (newBacklight != oldBacklight) setBacklight(newBacklight);
 		if (curMenuClock!=confInt["menuClock"]) setClock(confInt["menuClock"]);
 		if (curGlobalVolume!=confInt["globalVolume"]) setVolume(confInt["globalVolume"]);
+
+		if (confInt["backlightTimeout"] == 0) {
+			if (PowerSaver::isRunning())
+				delete PowerSaver::getInstance();
+		} else {
+			PowerSaver::getInstance()->setScreenTimeout( confInt["backlightTimeout"] );
+		}
+
 		if (lang == "English") lang = "";
-		if (lang != tr.lang()) tr.setLang(lang);
-		if (fileExists("/boot/local") && !showRootFolder)
-			unlink("/boot/local");
-		else if (!fileExists("/boot/local") && showRootFolder)
-			symlink("/","/boot/local");
+		if (lang != tr.lang()) {
+			tr.setLang(lang);
+			confStr["lang"] = lang;
+		}
+		/*if (fileExists(CARD_ROOT) && !showRootFolder)
+			unlink(CARD_ROOT);
+		else if (!fileExists(CARD_ROOT) && showRootFolder)
+			symlink("/", CARD_ROOT);*/
+		//WARNING: the above might be dangerous with CARD_ROOT set to /
 		writeConfig();
 	}
 }
 
+#ifdef PLATFORM_GP2X
 void GMenu2X::settingsOpen2x() {
-	SettingsDialog sd(this,tr["Open2x Settings"]);
+	SettingsDialog sd(this, input, ts, tr["Open2x Settings"]);
 	sd.addSetting(new MenuSettingBool(this,tr["USB net on boot"],tr["Allow USB networking to be started at boot time"],&o2x_usb_net_on_boot));
 	sd.addSetting(new MenuSettingString(this,tr["USB net IP"],tr["IP address to be used for USB networking"],&o2x_usb_net_ip));
 	sd.addSetting(new MenuSettingBool(this,tr["Telnet on boot"],tr["Allow telnet to be started at boot time"],&o2x_telnet_on_boot));
@@ -1080,21 +1353,25 @@ void GMenu2X::settingsOpen2x() {
 		setVolume(confInt["globalVolume"]);
 	}
 }
+#endif
 
 void GMenu2X::skinMenu() {
-	FileLister fl_sk("skins",true,false);
-	fl_sk.exclude.push_back("..");
+	FileLister fl_sk(getHome() + "/skins", true, false);
+	fl_sk.addExclude("..");
 	fl_sk.browse();
+	fl_sk.setPath(GMENU2X_SYSTEM_DIR "/skins", false);
+	fl_sk.browse(false);
+
 	string curSkin = confStr["skin"];
 
-	SettingsDialog sd(this,tr["Skin"]);
-	sd.addSetting(new MenuSettingMultiString(this,tr["Skin"],tr["Set the skin used by GMenu2X"],&confStr["skin"],&fl_sk.directories));
-	sd.addSetting(new MenuSettingRGBA(this,tr["Top Bar Color"],tr["Color of the top bar"],&skinConfColors["topBarBg"]));
-	sd.addSetting(new MenuSettingRGBA(this,tr["Bottom Bar Color"],tr["Color of the bottom bar"],&skinConfColors["bottomBarBg"]));
-	sd.addSetting(new MenuSettingRGBA(this,tr["Selection Color"],tr["Color of the selection and other interface details"],&skinConfColors["selectionBg"]));
-	sd.addSetting(new MenuSettingRGBA(this,tr["Message Box Color"],tr["Background color of the message box"],&skinConfColors["messageBoxBg"]));
-	sd.addSetting(new MenuSettingRGBA(this,tr["Message Box Border Color"],tr["Border color of the message box"],&skinConfColors["messageBoxBorder"]));
-	sd.addSetting(new MenuSettingRGBA(this,tr["Message Box Selection Color"],tr["Color of the selection of the message box"],&skinConfColors["messageBoxSelection"]));
+	SettingsDialog sd(this, input, ts, tr["Skin"]);
+	sd.addSetting(new MenuSettingMultiString(this,tr["Skin"],tr["Set the skin used by GMenu2X"],&confStr["skin"],&fl_sk.getDirectories()));
+	sd.addSetting(new MenuSettingRGBA(this,tr["Top Bar Color"],tr["Color of the top bar"],&skinConfColors[COLOR_TOP_BAR_BG]));
+	sd.addSetting(new MenuSettingRGBA(this,tr["Bottom Bar Color"],tr["Color of the bottom bar"],&skinConfColors[COLOR_BOTTOM_BAR_BG]));
+	sd.addSetting(new MenuSettingRGBA(this,tr["Selection Color"],tr["Color of the selection and other interface details"],&skinConfColors[COLOR_SELECTION_BG]));
+	sd.addSetting(new MenuSettingRGBA(this,tr["Message Box Color"],tr["Background color of the message box"],&skinConfColors[COLOR_MESSAGE_BOX_BG]));
+	sd.addSetting(new MenuSettingRGBA(this,tr["Message Box Border Color"],tr["Border color of the message box"],&skinConfColors[COLOR_MESSAGE_BOX_BORDER]));
+	sd.addSetting(new MenuSettingRGBA(this,tr["Message Box Selection Color"],tr["Color of the selection of the message box"],&skinConfColors[COLOR_MESSAGE_BOX_SELECTION]));
 
 	if (sd.exec() && sd.edited()) {
 		if (curSkin != confStr["skin"]) {
@@ -1107,7 +1384,7 @@ void GMenu2X::skinMenu() {
 }
 
 void GMenu2X::toggleTvOut() {
-#ifdef TARGET_GP2X
+#ifdef PLATFORM_GP2X
 /*	if (cx25874!=0)
 		gp2x_tvout_off();
 	else
@@ -1115,35 +1392,40 @@ void GMenu2X::toggleTvOut() {
 #endif
 }
 
-void GMenu2X::setSkin(string skin, bool setWallpaper) {
+void GMenu2X::setSkin(const string &skin, bool setWallpaper) {
 	confStr["skin"] = skin;
 
 	//Clear previous skin settings
-	skinConfColors.clear();
 	skinConfStr.clear();
 	skinConfInt.clear();
+
+	DEBUG("GMenu2X: setting new skin %s.\n", skin.c_str());
 
 	//clear collection and change the skin path
 	sc.clear();
 	sc.setSkin(skin);
 
 	//reset colors to the default values
-	skinConfColors["topBarBg"] = (RGBAColor){255,255,255,130};
-	skinConfColors["bottomBarBg"] = (RGBAColor){255,255,255,130};
-	skinConfColors["selectionBg"] = (RGBAColor){255,255,255,130};
-	skinConfColors["messageBoxBg"] = (RGBAColor){255,255,255,255};
-	skinConfColors["messageBoxBorder"] = (RGBAColor){80,80,80,255};
-	skinConfColors["messageBoxSelection"] = (RGBAColor){160,160,160,255};
+	skinConfColors[COLOR_TOP_BAR_BG] = (RGBAColor){255,255,255,130};
+	skinConfColors[COLOR_BOTTOM_BAR_BG] = (RGBAColor){255,255,255,130};
+	skinConfColors[COLOR_SELECTION_BG] = (RGBAColor){255,255,255,130};
+	skinConfColors[COLOR_MESSAGE_BOX_BG] = (RGBAColor){255,255,255,255};
+	skinConfColors[COLOR_MESSAGE_BOX_BORDER] = (RGBAColor){80,80,80,255};
+	skinConfColors[COLOR_MESSAGE_BOX_SELECTION] = (RGBAColor){160,160,160,255};
 
-	//load skin settings
-	string skinconfname = "skins/"+skin+"/skin.conf";
+	/* Load skin settings from user directory if present,
+	 * or from the system directory. */
+	string skinconfname = getHome() + "/skins/" + skin + "/skin.conf";
+	if (!fileExists(skinconfname))
+	  skinconfname = GMENU2X_SYSTEM_DIR "/skins/" + skin + "/skin.conf";
+
 	if (fileExists(skinconfname)) {
 		ifstream skinconf(skinconfname.c_str(), ios_base::in);
 		if (skinconf.is_open()) {
 			string line;
 			while (getline(skinconf, line, '\n')) {
 				line = trim(line);
-				cout << "skinconf: " << line << endl;
+				DEBUG("skinconf: '%s'\n", line.c_str());
 				string::size_type pos = line.find("=");
 				string name = trim(line.substr(0,pos));
 				string value = trim(line.substr(pos+1,line.length()));
@@ -1152,7 +1434,7 @@ void GMenu2X::setSkin(string skin, bool setWallpaper) {
 					if (value.length()>1 && value.at(0)=='"' && value.at(value.length()-1)=='"')
 						skinConfStr[name] = value.substr(1,value.length()-2);
 					else if (value.at(0) == '#')
-						skinConfColors[name] = strtorgba( value.substr(1,value.length()) );
+						skinConfColors[stringToColor(name)] = strtorgba( value.substr(1,value.length()) );
 					else
 						skinConfInt[name] = atoi(value.c_str());
 				}
@@ -1175,12 +1457,13 @@ void GMenu2X::setSkin(string skin, bool setWallpaper) {
 	if (menu != NULL) menu->loadIcons();
 
 	//Selection png
-	useSelectionPng = sc.addSkinRes("imgs/selection.png") != NULL;
+	useSelectionPng = sc.addSkinRes("imgs/selection.png", false) != NULL;
 
 	//font
 	initFont();
 }
 
+/*
 void GMenu2X::activateSdUsb() {
 	if (usbnet) {
 		MessageBox mb(this,tr["Operation not permitted."]+"\n"+tr["You should disable Usb Networking to do this."]);
@@ -1188,7 +1471,7 @@ void GMenu2X::activateSdUsb() {
 	} else {
 		system("scripts/usbon.sh sd");
 		MessageBox mb(this,tr["USB Enabled (SD)"],"icons/usb.png");
-		mb.buttons[ACTION_B] = tr["Turn off"];
+		mb.setButton(ACCEPT, tr["Turn off"]);
 		mb.exec();
 		system("scripts/usboff.sh sd");
 	}
@@ -1201,7 +1484,7 @@ void GMenu2X::activateNandUsb() {
 	} else {
 		system("scripts/usbon.sh nand");
 		MessageBox mb(this,tr["USB Enabled (Nand)"],"icons/usb.png");
-		mb.buttons[ACTION_B] = tr["Turn off"];
+		mb.setButton(ACCEPT, tr["Turn off"]);
 		mb.exec();
 		system("scripts/usboff.sh nand");
 	}
@@ -1214,10 +1497,15 @@ void GMenu2X::activateRootUsb() {
 	} else {
 		system("scripts/usbon.sh root");
 		MessageBox mb(this,tr["USB Enabled (Root)"],"icons/usb.png");
-		mb.buttons[ACTION_B] = tr["Turn off"];
+		mb.setButton(ACCEPT, tr["Turn off"]);
 		mb.exec();
 		system("scripts/usboff.sh root");
 	}
+}
+*/
+
+void GMenu2X::showManual() {
+	menu->selLinkApp()->showManual();
 }
 
 void GMenu2X::contextMenu() {
@@ -1225,6 +1513,16 @@ void GMenu2X::contextMenu() {
 	{
 	MenuOption opt = {tr.translate("Add link in $1",menu->selSection().c_str(),NULL), MakeDelegate(this, &GMenu2X::addLink)};
 	voices.push_back(opt);
+	}
+
+	{
+		LinkApp* app = menu->selLinkApp();
+		if (app && fileExists(app->getManual())) {
+			MenuOption opt = {tr.translate("Show manual of $1",menu->selLink()->getTitle().c_str(),NULL),
+				MakeDelegate(this, &GMenu2X::showManual),
+			};
+			voices.push_back(opt);
+		}
 	}
 
 	if (menu->selLinkApp()!=NULL) {
@@ -1255,7 +1553,6 @@ void GMenu2X::contextMenu() {
 	uint i, sel=0, fadeAlpha=0;
 
 	int h = font->getHeight();
-	int h2 = font->getHalfHeight();
 	SDL_Rect box;
 	box.h = (h+2)*voices.size()+8;
 	box.w = 0;
@@ -1275,6 +1572,8 @@ void GMenu2X::contextMenu() {
 	bg.box(0, 0, resX, resY, 0,0,0,150);
 	bg.box(box.x, box.y, box.w, box.h, skinConfColors["messageBoxBg"]);
 	bg.rectangle( box.x+2, box.y+2, box.w-4, box.h-4, skinConfColors["messageBoxBorder"] );*/
+
+    bevent_t event;
 	while (!close) {
 		tickNow = SDL_GetTicks();
 
@@ -1283,26 +1582,28 @@ void GMenu2X::contextMenu() {
 
 		if (fadeAlpha<200) fadeAlpha = intTransition(0,200,tickStart,500,tickNow);
 		s->box(0, 0, resX, resY, 0,0,0,fadeAlpha);
-		s->box(box.x, box.y, box.w, box.h, skinConfColors["messageBoxBg"]);
-		s->rectangle( box.x+2, box.y+2, box.w-4, box.h-4, skinConfColors["messageBoxBorder"] );
+		s->box(box.x, box.y, box.w, box.h, skinConfColors[COLOR_MESSAGE_BOX_BG]);
+		s->rectangle( box.x+2, box.y+2, box.w-4, box.h-4, skinConfColors[COLOR_MESSAGE_BOX_BORDER] );
 
 
 		//draw selection rect
-		s->box( selbox.x, selbox.y, selbox.w, selbox.h, skinConfColors["messageBoxSelection"] );
+		s->box( selbox.x, selbox.y, selbox.w, selbox.h, skinConfColors[COLOR_MESSAGE_BOX_SELECTION] );
 		for (i=0; i<voices.size(); i++)
-			s->write( font, voices[i].text, box.x+12, box.y+h2+5+(h+2)*i, SFontHAlignLeft, SFontVAlignMiddle );
+			s->write( font, voices[i].text, box.x+12, box.y+5+(h+2)*i, ASFont::HAlignLeft, ASFont::VAlignTop );
 		s->flip();
 
 		//touchscreen
-		if (f200) {
+		if (ts.initialized()) {
 			ts.poll();
 			if (ts.released()) {
 				if (!ts.inRect(box))
 					close = true;
-				else if (ts.x>=selbox.x && ts.x<=selbox.x+selbox.w)
+				else if (ts.getX() >= selbox.x
+					  && ts.getX() <= selbox.x + selbox.w)
 					for (i=0; i<voices.size(); i++) {
 						selbox.y = box.y+4+(h+2)*i;
-						if (ts.y>=selbox.y && ts.y<=selbox.y+selbox.h) {
+						if (ts.getY() >= selbox.y
+						 && ts.getY() <= selbox.y + selbox.h) {
 							voices[i].action();
 							close = true;
 							i = voices.size();
@@ -1311,7 +1612,8 @@ void GMenu2X::contextMenu() {
 			} else if (ts.pressed() && ts.inRect(box)) {
 				for (i=0; i<voices.size(); i++) {
 					selbox.y = box.y+4+(h+2)*i;
-					if (ts.y>=selbox.y && ts.y<=selbox.y+selbox.h) {
+					if (ts.getY() >= selbox.y
+					 && ts.getY() <= selbox.y + selbox.h) {
 						sel = i;
 						i = voices.size();
 					}
@@ -1319,11 +1621,30 @@ void GMenu2X::contextMenu() {
 			}
 		}
 
-		input.update();
-		if ( input[ACTION_SELECT] ) close = true;
-		if ( input[ACTION_UP    ] ) sel = max(0, sel-1);
-		if ( input[ACTION_DOWN  ] ) sel = min((int)voices.size()-1, sel+1);
-		if ( input[ACTION_B] ) { voices[sel].action(); close = true; }
+
+        if (fadeAlpha < 200) {
+            if (!input.pollEvent(&event) || event.state != PRESSED) continue;
+        } else {
+            event.button = input.waitForPressedButton();
+        }
+
+        switch(event.button) {
+            case MENU:
+                close = true;
+                break;
+            case UP:
+                sel = max(0, sel-1);
+                break;
+            case DOWN:
+                sel = min((int)voices.size()-1, sel+1);
+                break;
+            case ACCEPT:
+                voices[sel].action();
+                close = true;
+                break;
+            default:
+                break;
+        }
 	}
 }
 
@@ -1336,29 +1657,11 @@ void GMenu2X::changeWallpaper() {
 	}
 }
 
-void GMenu2X::saveScreenshot() {
-	ledOn();
-	uint x = 0;
-	stringstream ss;
-	string fname;
-	do {
-		x++;
-		fname = "";
-		ss.clear();
-		ss << x;
-		ss >> fname;
-		fname = "screen"+fname+".bmp";
-	} while (fileExists(fname));
-	SDL_SaveBMP(s->raw,fname.c_str());
-	sync();
-	ledOff();
-}
-
 void GMenu2X::addLink() {
 	FileDialog fd(this,tr["Select an application"]);
 	if (fd.exec()) {
 		ledOn();
-		menu->addLink(fd.path(), fd.file);
+		menu->addLink(fd.getPath(), fd.getFile());
 		sync();
 		ledOff();
 	}
@@ -1368,7 +1671,7 @@ void GMenu2X::editLink() {
 	if (menu->selLinkApp()==NULL) return;
 
 	vector<string> pathV;
-	split(pathV,menu->selLinkApp()->file,"/");
+	split(pathV,menu->selLinkApp()->getFile(),"/");
 	string oldSection = "";
 	if (pathV.size()>1)
 		oldSection = pathV[pathV.size()-2];
@@ -1388,31 +1691,29 @@ void GMenu2X::editLink() {
 	int linkClock = menu->selLinkApp()->clock();
 	int linkVolume = menu->selLinkApp()->volume();
 	//G
-	int linkGamma = menu->selLinkApp()->gamma();
-	int linkBacklight = menu->selLinkApp()->backlight();
+	//int linkGamma = menu->selLinkApp()->gamma();
 
 	string diagTitle = tr.translate("Edit link: $1",linkTitle.c_str(),NULL);
 	string diagIcon = menu->selLinkApp()->getIconPath();
 
-	SettingsDialog sd(this,diagTitle,diagIcon);
+	SettingsDialog sd(this, input, ts, diagTitle, diagIcon);
 	sd.addSetting(new MenuSettingString(this,tr["Title"],tr["Link title"],&linkTitle, diagTitle,diagIcon));
 	sd.addSetting(new MenuSettingString(this,tr["Description"],tr["Link description"],&linkDescription, diagTitle,diagIcon));
-	sd.addSetting(new MenuSettingMultiString(this,tr["Section"],tr["The section this link belongs to"],&newSection,&menu->sections));
+	sd.addSetting(new MenuSettingMultiString(this,tr["Section"],tr["The section this link belongs to"],&newSection,&menu->getSections()));
 	sd.addSetting(new MenuSettingImage(this,tr["Icon"],tr.translate("Select an icon for the link: $1",linkTitle.c_str(),NULL),&linkIcon,".png,.bmp,.jpg,.jpeg"));
 	sd.addSetting(new MenuSettingFile(this,tr["Manual"],tr["Select a graphic/textual manual or a readme"],&linkManual,".man.png,.txt"));
-	sd.addSetting(new MenuSettingInt(this,tr["Clock (default: 336)"],tr["Cpu clock frequency to set when launching this link"],&linkClock,200,confInt["maxClock"]));
+	sd.addSetting(new MenuSettingInt(this,tr["Clock (default: 336)"],tr["Cpu clock frequency to set when launching this link"],&linkClock,cpuFreqMin,confInt["maxClock"],cpuFreqMultiple));
 //	sd.addSetting(new MenuSettingBool(this,tr["Tweak RAM Timings"],tr["This usually speeds up the application at the cost of stability"],&linkUseRamTimings));
 	sd.addSetting(new MenuSettingInt(this,tr["Volume (default: -1)"],tr["Volume to set for this link"],&linkVolume,-1,100));
-	sd.addSetting(new MenuSettingInt(this,tr["Backlight (default: 100)"],tr["LCD backlight value to set when launching this link"],&linkBacklight,5,100));
 	sd.addSetting(new MenuSettingString(this,tr["Parameters"],tr["Parameters to pass to the application"],&linkParams, diagTitle,diagIcon));
 	sd.addSetting(new MenuSettingDir(this,tr["Selector Directory"],tr["Directory to scan for the selector"],&linkSelDir));
 	sd.addSetting(new MenuSettingBool(this,tr["Selector Browser"],tr["Allow the selector to change directory"],&linkSelBrowser));
-	sd.addSetting(new MenuSettingString(this,tr["Selector Filter"],tr["Filter for the selector (Separate values with a comma)"],&linkSelFilter, diagTitle,diagIcon));
+	sd.addSetting(new MenuSettingString(this,tr["Selector Filter"],tr["Selector filter (Separate values with a comma)"],&linkSelFilter, diagTitle,diagIcon));
 	sd.addSetting(new MenuSettingDir(this,tr["Selector Screenshots"],tr["Directory of the screenshots for the selector"],&linkSelScreens));
 	sd.addSetting(new MenuSettingFile(this,tr["Selector Aliases"],tr["File containing a list of aliases for the selector"],&linkSelAliases));
 	//G
-	sd.addSetting(new MenuSettingBool(this,tr["Wrapper"],tr["Explicitly relaunch GMenu2X after this link's execution ends"],&menu->selLinkApp()->wrapper));
-	sd.addSetting(new MenuSettingBool(this,tr["Don't Leave"],tr["Don't quit GMenu2X when launching this link"],&menu->selLinkApp()->dontleave));
+	sd.addSetting(new MenuSettingBool(this,tr["Wrapper"],tr["Explicitly relaunch GMenu2X after execution"],&menu->selLinkApp()->needsWrapperRef()));
+	sd.addSetting(new MenuSettingBool(this,tr["Don't Leave"],tr["Don't quit GMenu2X when launching this link"],&menu->selLinkApp()->runsInBackgroundRef()));
 
 	if (sd.exec() && sd.edited()) {
 		ledOn();
@@ -1430,16 +1731,13 @@ void GMenu2X::editLink() {
 		menu->selLinkApp()->setAliasFile(linkSelAliases);
 		menu->selLinkApp()->setClock(linkClock);
 		menu->selLinkApp()->setVolume(linkVolume);
-		//G
-		menu->selLinkApp()->setBacklight(linkBacklight);
 
-#ifdef DEBUG
-		cout << "New Section: " << newSection << endl;
-#endif
+		INFO("New Section: '%s'\n", newSection.c_str());
+
 		//if section changed move file and update link->file
 		if (oldSection!=newSection) {
-			vector<string>::iterator newSectionIndex = find(menu->sections.begin(),menu->sections.end(),newSection);
-			if (newSectionIndex==menu->sections.end()) return;
+			vector<string>::const_iterator newSectionIndex = find(menu->getSections().begin(),menu->getSections().end(),newSection);
+			if (newSectionIndex==menu->getSections().end()) return;
 			string newFileName = "sections/"+newSection+"/"+linkTitle;
 			uint x=2;
 			while (fileExists(newFileName)) {
@@ -1448,12 +1746,12 @@ void GMenu2X::editLink() {
 				newFileName = "sections/"+newSection+"/"+linkTitle+id;
 				x++;
 			}
-			rename(menu->selLinkApp()->file.c_str(),newFileName.c_str());
-			menu->selLinkApp()->file = newFileName;
-#ifdef DEBUG
-			cout << "New section index: " << newSectionIndex - menu->sections.begin() << endl;
-#endif
-			menu->linkChangeSection(menu->selLinkIndex(), menu->selSectionIndex(), newSectionIndex - menu->sections.begin());
+			rename(menu->selLinkApp()->getFile().c_str(),newFileName.c_str());
+			menu->selLinkApp()->renameFile(newFileName);
+
+			INFO("New section index: %i.\n", newSectionIndex - menu->getSections().begin());
+
+			menu->linkChangeSection(menu->selLinkIndex(), menu->selSectionIndex(), newSectionIndex - menu->getSections().begin());
 		}
 		menu->selLinkApp()->save();
 		sync();
@@ -1465,9 +1763,9 @@ void GMenu2X::editLink() {
 void GMenu2X::deleteLink() {
 	if (menu->selLinkApp()!=NULL) {
 		MessageBox mb(this, tr.translate("Deleting $1",menu->selLink()->getTitle().c_str(),NULL)+"\n"+tr["Are you sure?"], menu->selLink()->getIconPath());
-		mb.buttons[ACTION_B] = tr["Yes"];
-		mb.buttons[ACTION_X] = tr["No"];
-		if (mb.exec() == ACTION_B) {
+		mb.setButton(ACCEPT, tr["Yes"]);
+		mb.setButton(CANCEL, tr["No"]);
+		if (mb.exec() == ACCEPT) {
 			ledOn();
 			menu->deleteSelectedLink();
 			sync();
@@ -1477,14 +1775,15 @@ void GMenu2X::deleteLink() {
 }
 
 void GMenu2X::addSection() {
-	InputDialog id(this,tr["Insert a name for the new section"]);
+	InputDialog id(this, input, ts, tr["Insert a name for the new section"]);
 	if (id.exec()) {
 		//only if a section with the same name does not exist
-		if (find(menu->sections.begin(),menu->sections.end(),id.input)==menu->sections.end()) {
+		if (find(menu->getSections().begin(), menu->getSections().end(), id.getInput())
+				== menu->getSections().end()) {
 			//section directory doesn't exists
 			ledOn();
-			if (menu->addSection(id.input)) {
-				menu->setSectionIndex( menu->sections.size()-1 ); //switch to the new section
+			if (menu->addSection(id.getInput())) {
+				menu->setSectionIndex( menu->getSections().size()-1 ); //switch to the new section
 				sync();
 			}
 			ledOff();
@@ -1493,28 +1792,33 @@ void GMenu2X::addSection() {
 }
 
 void GMenu2X::renameSection() {
-	InputDialog id(this,tr["Insert a new name for this section"],menu->selSection());
+	InputDialog id(this, input, ts, tr["Insert a new name for this section"],menu->selSection());
 	if (id.exec()) {
 		//only if a section with the same name does not exist & !samename
-		if (menu->selSection()!=id.input && find(menu->sections.begin(),menu->sections.end(),id.input)==menu->sections.end()) {
+		if (menu->selSection() != id.getInput()
+		 && find(menu->getSections().begin(),menu->getSections().end(), id.getInput())
+				== menu->getSections().end()) {
 			//section directory doesn't exists
-			string newsectiondir = "sections/"+id.input;
-			string sectiondir = "sections/"+menu->selSection();
+			string newsectiondir = getHome() + "/sections/" + id.getInput();
+			string sectiondir = getHome() + "/sections/" + menu->selSection();
 			ledOn();
-			if (rename(sectiondir.c_str(), "tmpsection")==0 && rename("tmpsection", newsectiondir.c_str())==0) {
-				string oldpng = sectiondir+".png", newpng = newsectiondir+".png";
-				string oldicon = sc.getSkinFilePath(oldpng), newicon = sc.getSkinFilePath(newpng);
+
+			if (!rename(sectiondir.c_str(), newsectiondir.c_str())) {
+				string oldpng = menu->selSection() + ".png";
+				string newpng = id.getInput() + ".png";
+				string oldicon = sc.getSkinFilePath(oldpng);
+				string newicon = sc.getSkinFilePath(newpng);
+
 				if (!oldicon.empty() && newicon.empty()) {
 					newicon = oldicon;
-          				newicon.replace(newicon.find(oldpng), oldpng.length(), newpng);
+					newicon.replace(newicon.find(oldpng), oldpng.length(), newpng);
 
 					if (!fileExists(newicon)) {
-						rename(oldicon.c_str(), "tmpsectionicon");
-						rename("tmpsectionicon", newicon.c_str());
+						rename(oldicon.c_str(), newicon.c_str());
 						sc.move("skin:"+oldpng, "skin:"+newpng);
 					}
 				}
-				menu->sections[menu->selSectionIndex()] = id.input;
+				menu->renameSection(menu->selSectionIndex(), id.getInput());
 				sync();
 			}
 			ledOff();
@@ -1524,11 +1828,11 @@ void GMenu2X::renameSection() {
 
 void GMenu2X::deleteSection() {
 	MessageBox mb(this,tr["You will lose all the links in this section."]+"\n"+tr["Are you sure?"]);
-	mb.buttons[ACTION_B] = tr["Yes"];
-	mb.buttons[ACTION_X] = tr["No"];
-	if (mb.exec() == ACTION_B) {
+	mb.setButton(ACCEPT, tr["Yes"]);
+	mb.setButton(CANCEL, tr["No"]);
+	if (mb.exec() == ACCEPT) {
 		ledOn();
-		if (rmtree(path+"sections/"+menu->selSection())) {
+		if (rmtree(getHome() + "/sections/" + menu->selSection())) {
 			menu->deleteSelectedSection();
 			sync();
 		}
@@ -1538,18 +1842,19 @@ void GMenu2X::deleteSection() {
 
 void GMenu2X::scanner() {
 	Surface scanbg(bg);
-	drawButton(&scanbg, "x", tr["Exit"],
-	drawButton(&scanbg, "b", "", 5)-10);
-	scanbg.write(font,tr["Link Scanner"],halfX,7,SFontHAlignCenter,SFontVAlignMiddle);
+	drawButton(&scanbg, "cancel", tr["Exit"],
+	drawButton(&scanbg, "accept", "", 5)-10);
+	scanbg.write(font,tr["Link Scanner"],halfX,7,ASFont::HAlignCenter,ASFont::VAlignMiddle);
+	scanbg.convertToDisplayFormat();
 
 	uint lineY = 42;
 
-#ifdef _TARGET_PANDORA
+#ifdef PLATFORM_PANDORA
 	//char *configpath = pnd_conf_query_searchpath();
 #else
-	if (confInt["menuClock"]<430) {
+	if (confInt["menuClock"]<336) {
 		setClock(336);
-		scanbg.write(font,tr["Raising cpu clock to 336Mhz"],5,lineY);
+		scanbg.write(font,tr["Raising cpu clock to 336MHz"],5,lineY);
 		scanbg.blit(s,0,0);
 		s->flip();
 		lineY += 26;
@@ -1561,17 +1866,28 @@ void GMenu2X::scanner() {
 	lineY += 26;
 
 	vector<string> files;
-	scanPath("/boot/local/",&files);
+	scanPath(CARD_ROOT, &files);
 
+	const char *nandpath = NULL;
+
+#if defined(PLATFORM_GP2X)
 	//Onyl gph firmware has nand
-/*	if (fwType=="gph" && !f200) {
+	if (fwType=="gph" && !isF200())
+		nandpath = "/boot/local/nand";
+#elif defined(PLATFORM_DINGUX)
+	nandpath = "/media/ccnandb1";
+#elif defined(PLATFORM_SPICA)
+	nandpath = "/dev/mmcblk0p2" //temporary solution for not messing in internal flash
+#endif
+
+	if (nandpath) {
 		scanbg.write(font,tr["Scanning NAND filesystem..."],5,lineY);
 		scanbg.blit(s,0,0);
 		s->flip();
 		lineY += 26;
-		scanPath("/boot/local/nand",&files);
+		scanPath(nandpath, &files);
 	}
-*/
+
 	stringstream ss;
 	ss << files.size();
 	string str = "";
@@ -1606,7 +1922,7 @@ void GMenu2X::scanner() {
 	s->flip();
 	lineY += 26;
 
-	if (confInt["menuClock"]<430) {
+	if (confInt["menuClock"]<336) {
 		setClock(confInt["menuClock"]);
 		scanbg.write(font,tr["Decreasing cpu clock"],5,lineY);
 		scanbg.blit(s,0,0);
@@ -1618,12 +1934,22 @@ void GMenu2X::scanner() {
 	ledOff();
 #endif
 
-	bool close = false;
-	while (!close) {
-		input.update();
-		if (input[ACTION_START] || input[ACTION_B] || input[ACTION_X]) close = true;
-		usleep(30000);
-	}
+    buttontype_t button;
+    do {
+        button = input.waitForPressedButton();
+    } while ((button != SETTINGS)
+                && (button != ACCEPT)
+                && (button != CANCEL));
+
+    /*
+    bevent_t event;
+    do {
+        input.getEvent(&event, true);
+    } while ((event.state != PRESSED) ||
+                (  (event.button != SETTINGS)
+                && (event.button != ACCEPT)
+                && (event.button != CLEAR)));
+                */
 }
 
 void GMenu2X::scanPath(string path, vector<string> *files) {
@@ -1644,8 +1970,10 @@ void GMenu2X::scanPath(string path, vector<string> *files) {
 			scanPath(filepath, files);
 		if (statRet != -1) {
 			ext = filepath.substr(filepath.length()-4,4);
-#ifdef TARGET_GP2X
-			if (ext==".gpu" || ext==".dge")
+#ifdef PLATFORM_GP2X
+			if (ext==".gpu")
+#elif defined(PLATFORM_DINGUX) || defined(PLATFORM_NANONOTE) || defined(PLATFORM_SPICA)
+			if (ext==".dge")
 #else
 			if (ext==".pxml")
 #endif
@@ -1657,7 +1985,7 @@ void GMenu2X::scanPath(string path, vector<string> *files) {
 }
 
 unsigned short GMenu2X::getBatteryLevel() {
-#ifdef TARGET_GP2X
+#ifdef PLATFORM_GP2X
 /*	if (batteryHandle<=0) return 0;
 
 	if (f200) {
@@ -1690,41 +2018,50 @@ unsigned short GMenu2X::getBatteryLevel() {
 		if (battval>690) return 2;
 		if (battval>680) return 1;
 	}*/
+
+#else
 	if (!batteryHandle) return 0;
 	int battval = 0;
-	char battvalcstr[5];
-	fscanf(batteryHandle,"%s",&battvalcstr);
+	fscanf(batteryHandle, "%d", &battval);
 	rewind(batteryHandle);
-	battval = atoi(battvalcstr);
-	if (battval>4000) return 5;
-	if (battval>3800) return 4;
-	if (battval>3600) return 3;
-	if (battval>3400) return 2;
-	if (battval>3200) return 1;
+	if (battval>90) return 5;
+	if (battval>70) return 4;
+	if (battval>50) return 3;
+	if (battval>30) return 2;
+	if (battval>10) return 1;
+
+	if (!usbHandle) return 0;
+	int usbval = 0;
+	fscanf(usbHandle, "%d", &usbval);
+	rewind(usbHandle);
+	if (usbval==1) return 6;
+
 	return 0;
-#else
-	return 6; //AC Power
+//#else
+//	return 6; //AC Power
 #endif
 }
 
 void GMenu2X::setInputSpeed() {
+    /*
 	input.setInterval(150);
-	input.setInterval(30,  ACTION_VOLDOWN);
-	input.setInterval(30,  ACTION_VOLUP  );
-	input.setInterval(30,  ACTION_A      );
-	input.setInterval(500, ACTION_START  );
-	input.setInterval(500, ACTION_SELECT );
-	input.setInterval(300, ACTION_X      );
-	input.setInterval(300,  ACTION_Y      );
-	input.setInterval(1000,ACTION_B      );
+	input.setInterval(30,  VOLDOWN);
+	input.setInterval(30,  VOLUP  );
+	input.setInterval(30,  CANCEL      );
+	input.setInterval(500, SETTINGS  );
+	input.setInterval(500, MENU );
+	input.setInterval(300, CLEAR      );
+	input.setInterval(300,  MANUAL      );
+	input.setInterval(1000,ACCEPT      );
 	//joy.setInterval(1000,ACTION_CLICK  );
-	input.setInterval(300, ACTION_L      );
-	input.setInterval(300, ACTION_R      );
+	input.setInterval(300, ALTLEFT      );
+	input.setInterval(300, ALTRIGHT      );
+    */
 	SDL_EnableKeyRepeat(1,150);
 }
 
 void GMenu2X::applyRamTimings() {
-#ifdef TARGET_GP2X
+#ifdef PLATFORM_GP2X
 	// 6 4 1 1 1 2 2
 /*	if (gp2x_mem!=0) {
 		int tRC = 5, tRAS = 3, tWR = 0, tMRD = 0, tRFC = 0, tRP = 1, tRCD = 1;
@@ -1735,7 +2072,7 @@ void GMenu2X::applyRamTimings() {
 }
 
 void GMenu2X::applyDefaultTimings() {
-#ifdef TARGET_GP2X
+#ifdef PLATFORM_GP2X
 	// 8 16 3 8 8 8 8
 /*	if (gp2x_mem!=0) {
 		int tRC = 7, tRAS = 15, tWR = 2, tMRD = 7, tRFC = 7, tRP = 7, tRCD = 7;
@@ -1748,25 +2085,14 @@ void GMenu2X::applyDefaultTimings() {
 
 
 void GMenu2X::setClock(unsigned mhz) {
-	mhz = constrain(mhz,200,confInt["maxClock"]);
-#ifdef TARGET_GP2X
-/*	if (gp2x_mem!=0) {
-		unsigned v;
-		unsigned mdiv,pdiv=3,scale=0;
-		mhz*=1000000;
-		mdiv=(mhz*pdiv)/GP2X_CLK_FREQ;
-		mdiv=((mdiv-8)<<8) & 0xff00;
-		pdiv=((pdiv-2)<<2) & 0xfc;
-		scale&=3;
-		v=mdiv | pdiv | scale;
-		MEM_REG[0x910>>1]=v;
-	}*/
+	mhz = constrain(mhz, cpuFreqMin, confInt["maxClock"]);
+#if defined(PLATFORM_DINGUX) || defined(PLATFORM_NANONOTE) || defined(PLATFORM_SPICA)
 	jz_cpuspeed(mhz);
 #endif
 }
 
-void GMenu2X::setGamma(int gamma) {
-#ifdef TARGET_GP2X
+void GMenu2X::setGamma(int /*gamma*/) {
+#ifdef PLATFORM_GP2X
 /*	float fgamma = (float)constrain(gamma,1,100)/10;
 	fgamma = 1 / fgamma;
 	MEM_REG[0x2880>>1]&=~(1<<12);
@@ -1786,9 +2112,9 @@ int GMenu2X::getVolume() {
     	int basevolume = -1;
 	mixer = open("/dev/mixer", O_RDONLY);
 	if(mixer)
-	{	
+	{
 		if (ioctl(mixer, SOUND_MIXER_READ_VOLUME, &basevolume) == -1) {
-			fprintf(stderr, "Failed opening mixer for read - VOLUME\n");
+			ERROR("Failed opening mixer for read - VOLUME\n");
 		}
 		close(mixer);
 		if(basevolume != -1)
@@ -1805,11 +2131,11 @@ void GMenu2X::setVolume(int vol) {
 	if(mixer)
 	{
 		if (ioctl(mixer, SOUND_MIXER_WRITE_VOLUME, &oss_volume) == -1) {
-			fprintf(stderr, "Failed opening mixer for write - VOLUME\n");
+			ERROR("Failed opening mixer for write - VOLUME\n");
 		}
 		close(mixer);
 	}
-	
+
 }
 
 void GMenu2X::setVolumeScaler(int scale) {
@@ -1831,10 +2157,11 @@ int GMenu2X::getVolumeScaler() {
 	return currentscalefactor;
 }
 
-string GMenu2X::getExePath() {
+const string &GMenu2X::getExePath() {
 	if (path.empty()) {
 		char buf[255];
-		int l = readlink("/proc/self/exe",buf,255);
+		memset(buf, 0, 255);
+		int l = readlink("/proc/self/exe", buf, 255);
 
 		path = buf;
 		path = path.substr(0,l);
@@ -1844,50 +2171,50 @@ string GMenu2X::getExePath() {
 	return path;
 }
 
-string GMenu2X::getDiskFree() {
+string GMenu2X::getDiskFree(const char *path) {
 	stringstream ss;
 	string df = "";
 	struct statvfs b;
 
-	int ret = statvfs("/boot/local/gmenu2x", &b);
+	int ret = statvfs(path, &b);
 	if (ret==0) {
-		/*unsigned long free = b.f_bfree*b.f_frsize/1048576;
-		unsigned long total = b.f_blocks*b.f_frsize/1048576;
-		ss << free << "/" << total << "MB";*/
-		double free = (double)b.f_bfree * (double)b.f_bsize / 1048576.0;
-		double total = (double)b.f_blocks * (double)b.f_frsize / 1048576.0;
-		ss << (unsigned long)free << "/" << (unsigned long)total << "MB";
+		// Make sure that the multiplication happens in 64 bits.
+		unsigned long long free =
+			((unsigned long long)b.f_bfree * b.f_bsize) / 1048576;
+		unsigned long long total =
+			((unsigned long long)b.f_blocks * b.f_frsize) / 1048576;
+		ss << free << "/" << total << "MB";
 		ss >> df;
-	} else cout << "\033[0;34mGMENU2X:\033[0;31m statvfs failed with error '" << strerror(errno) << "'\033[0m" << endl;
+	} else WARNING("statvfs failed with error '%s'.\n", strerror(errno));
 	return df;
 }
 
-int GMenu2X::drawButton(IconButton *btn, int x, int y) {
+int GMenu2X::drawButton(Button *btn, int x, int y) {
 	if (y<0) y = resY+y;
 	btn->setPosition(x, y-7);
 	btn->paint();
 	return x+btn->getRect().w+6;
 }
 
-int GMenu2X::drawButton(Surface *s, string btn, string text, int x, int y) {
+int GMenu2X::drawButton(Surface *s, const string &btn, const string &text, int x, int y) {
 	if (y<0) y = resY+y;
 	SDL_Rect re = {x, y-7, 0, 16};
 	if (sc.skinRes("imgs/buttons/"+btn+".png") != NULL) {
 		sc["imgs/buttons/"+btn+".png"]->blit(s, x, y-7);
-		re.w = sc["imgs/buttons/"+btn+".png"]->raw->w+3;
-		s->write(font, text, x+re.w, y, SFontHAlignLeft, SFontVAlignMiddle);
+		re.w = sc["imgs/buttons/"+btn+".png"]->width() + 3;
+		s->write(font, text, x+re.w, y, ASFont::HAlignLeft, ASFont::VAlignMiddle);
 		re.w += font->getTextWidth(text);
 	}
 	return x+re.w+6;
 }
 
-int GMenu2X::drawButtonRight(Surface *s, string btn, string text, int x, int y) {
+int GMenu2X::drawButtonRight(Surface *s, const string &btn, const string &text, int x, int y) {
 	if (y<0) y = resY+y;
 	if (sc.skinRes("imgs/buttons/"+btn+".png") != NULL) {
 		x -= 16;
 		sc["imgs/buttons/"+btn+".png"]->blit(s, x, y-7);
 		x -= 3;
-		s->write(font, text, x, y, SFontHAlignRight, SFontVAlignMiddle);
+		s->write(font, text, x, y, ASFont::HAlignRight, ASFont::VAlignMiddle);
 		return x-6-font->getTextWidth(text);
 	}
 	return x-6;
@@ -1896,7 +2223,7 @@ int GMenu2X::drawButtonRight(Surface *s, string btn, string text, int x, int y) 
 void GMenu2X::drawScrollBar(uint pagesize, uint totalsize, uint pagepos, uint top, uint height) {
 	if (totalsize<=pagesize) return;
 
-	s->rectangle(resX-8, top, 7, height, skinConfColors["selectionBg"]);
+	s->rectangle(resX-8, top, 7, height, skinConfColors[COLOR_SELECTION_BG]);
 
 	//internal bar total height = height-2
 	//bar size
@@ -1907,52 +2234,26 @@ void GMenu2X::drawScrollBar(uint pagesize, uint totalsize, uint pagepos, uint to
 	if (by+bs>top+height-2) by = top+height-2-bs;
 
 
-	s->box(resX-6, by, 3, bs, skinConfColors["selectionBg"]);
-}
-
-void GMenu2X::drawTitleIcon(string icon, bool skinRes, Surface *s) {
-	if (s==NULL) s = this->s;
-
-	Surface *i = NULL;
-	if (!icon.empty()) {
-		if (skinRes)
-			i = sc.skinRes(icon);
-		else
-			i = sc[icon];
-	}
-
-	if (i==NULL)
-		i = sc.skinRes("icons/generic.png");
-
-	i->blit(s,4,(skinConfInt["topBarHeight"]-32)/2);
-}
-
-void GMenu2X::writeTitle(string title, Surface *s) {
-	if (s==NULL) s = this->s;
-	s->write(font,title,40, skinConfInt["topBarHeight"]/4, SFontHAlignLeft, SFontVAlignMiddle);
-}
-
-void GMenu2X::writeSubTitle(string subtitle, Surface *s) {
-	if (s==NULL) s = this->s;
-	s->write(font,subtitle,40, skinConfInt["topBarHeight"]/4*3, SFontHAlignLeft, SFontVAlignMiddle);
+	s->box(resX-6, by, 3, bs, skinConfColors[COLOR_SELECTION_BG]);
 }
 
 void GMenu2X::drawTopBar(Surface *s) {
 	if (s==NULL) s = this->s;
 
-	Surface *bar = sc.skinRes("imgs/topbar.png");
+	Surface *bar = sc.skinRes("imgs/topbar.png", false);
 	if (bar != NULL)
 		bar->blit(s, 0, 0);
 	else
-		s->box(0, 0, resX, skinConfInt["topBarHeight"], skinConfColors["topBarBg"]);
+		s->box(0, 0, resX, skinConfInt["topBarHeight"],
+		skinConfColors[COLOR_TOP_BAR_BG]);
 }
 
 void GMenu2X::drawBottomBar(Surface *s) {
 	if (s==NULL) s = this->s;
 
-	Surface *bar = sc.skinRes("imgs/bottombar.png");
+	Surface *bar = sc.skinRes("imgs/bottombar.png", false);
 	if (bar != NULL)
-		bar->blit(s, 0, resY-bar->raw->h);
+		bar->blit(s, 0, resY-bar->height());
 	else
-		s->box(0, resY-20, resX, 20, skinConfColors["bottomBarBg"]);
+		s->box(0, resY-20, resX, 20, skinConfColors[COLOR_BOTTOM_BAR_BG]);
 }

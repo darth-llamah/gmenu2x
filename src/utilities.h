@@ -21,45 +21,28 @@
 #ifndef UTILITIES_H
 #define UTILITIES_H
 
-#include <SDL.h>
-#include <SDL_gfxPrimitives.h>
-#include <fstream>
 #include <string>
 #include <vector>
-#include <ext/hash_map>
+#include <tr1/unordered_map>
 
-using __gnu_cxx::hash_map;
-using __gnu_cxx::hash;
+using std::tr1::unordered_map;
+using std::tr1::hash;
 using std::string;
 using std::vector;
 
-namespace __gnu_cxx {
-	template<> struct hash< std::string > {
-		size_t operator()( const std::string& x ) const {
-			return hash< const char* >()( x.c_str() );
-		}
-	};
-}
-
-struct eqstr {
-	bool operator()(const char* s1, const char* s2) const {
-		return (s1 == s2) || (s1 && s2 && strcmp(s1, s2) == 0);
-	}
-};
-
 class case_less {
 public:
-	bool operator()(string const &left, string const &right) const;
+	bool operator()(const string &left, const string &right) const;
 };
 
 string trim(const string& s);
-string strreplace (string orig, string search, string replace);
+string strreplace (string orig, const string &search, const string &replace);
 string cmdclean (string cmdline);
 
-char *string_copy(string);
-void string_copy(string, char **);
+char *string_copy(const string &);
+void string_copy(const string &, char **);
 
-bool fileExists(string file);
+bool fileExists(const string &file);
 bool rmtree(string path);
 
 int max (int a, int b);
@@ -68,12 +51,8 @@ int constrain (int x, int imin, int imax);
 
 int evalIntConf (int val, int def, int imin, int imax);
 int evalIntConf (int *val, int def, int imin, int imax);
-string evalStrConf (string val, string def);
-string evalStrConf (string *val, string def);
-
-float max (float a, float b);
-float min (float a, float b);
-float constrain (float x, float imin, float imax);
+const string &evalStrConf (const string &val, const string &def);
+const string &evalStrConf (string *val, const string &def);
 
 bool split (vector<string> &vec, const string &str, const string &delim, bool destructive=true);
 

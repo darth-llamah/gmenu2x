@@ -18,19 +18,37 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 #include "menusetting.h"
+#include "asfont.h"
+#include "gmenu2x.h"
 
-MenuSetting::MenuSetting(GMenu2X *gmenu2x, string name, string description) {
-	this->gmenu2x = gmenu2x;
-	this->name = name;
-	this->description = description;
+MenuSetting::MenuSetting(GMenu2X *gmenu2x, const string &name,
+		const string &description)
+	: gmenu2x(gmenu2x)
+	, buttonBox(gmenu2x)
+	, name(name)
+	, description(description)
+{
 }
 
-void MenuSetting::draw(int y) {
-	gmenu2x->s->write( gmenu2x->font, name, 5, y+gmenu2x->font->getHalfHeight(), SFontHAlignLeft, SFontVAlignMiddle );
+MenuSetting::~MenuSetting()
+{
 }
 
-void MenuSetting::handleTS() {}
-void MenuSetting::manageInput() {}
-void MenuSetting::adjustInput() {}
-void MenuSetting::drawSelected(int) {}
-bool MenuSetting::edited() { return true; }
+void MenuSetting::draw(int y)
+{
+	gmenu2x->s->write( gmenu2x->font, name, 5, y, ASFont::HAlignLeft, ASFont::VAlignTop );
+}
+
+void MenuSetting::handleTS()
+{
+	buttonBox.handleTS();
+}
+
+void MenuSetting::adjustInput()
+{
+}
+
+void MenuSetting::drawSelected(int /*y*/)
+{
+	buttonBox.paint(5);
+}

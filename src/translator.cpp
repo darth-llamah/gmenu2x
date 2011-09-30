@@ -18,15 +18,18 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdarg.h>
 
 #include "translator.h"
+#include "debug.h"
+#include "gmenu2x.h"
 
 using namespace std;
 
-Translator::Translator(string lang) {
+Translator::Translator(const string &lang) {
 	_lang = "";
 	if (!lang.empty())
 		setLang(lang);
@@ -34,15 +37,18 @@ Translator::Translator(string lang) {
 
 Translator::~Translator() {}
 
-bool Translator::exists(string term) {
+bool Translator::exists(const string &term) {
 	return translations.find(term) != translations.end();
 }
 
-void Translator::setLang(string lang) {
+void Translator::setLang(const string &lang) {
 	translations.clear();
 
 	string line;
-	ifstream infile (string("translations/"+lang).c_str(), ios_base::in);
+	ifstream infile ((GMenu2X::getHome() + "/translations/" + lang).c_str(), ios_base::in);
+	if (!infile.is_open())
+	  infile.open((string(GMENU2X_SYSTEM_DIR "/translations/") + lang).c_str(), ios_base::in);
+
 	if (infile.is_open()) {
 		while (getline(infile, line, '\n')) {
 			line = trim(line);
@@ -57,17 +63,16 @@ void Translator::setLang(string lang) {
 	}
 }
 
-string Translator::translate(string term,const char *replacestr,...) {
+string Translator::translate(const string &term,const char *replacestr,...) {
 	string result = term;
 
 	if (!_lang.empty()) {
-		hash_map<string, string>::iterator i = translations.find(term);
+		unordered_map<string, string>::iterator i = translations.find(term);
 		if (i != translations.end()) {
 			result = i->second;
 		}
-	#ifdef DEBUG
-		else cout << "Untranslated string: " << term << endl;
-	#endif
+
+		else WARNING("Untranslated string: '%s'\n", term.c_str());
 	}
 
 	va_list arglist;
@@ -87,7 +92,7 @@ string Translator::translate(string term,const char *replacestr,...) {
 	return result;
 }
 
-string Translator::operator[](string term) {
+string Translator::operator[](const string &term) {
 	return translate(term);
 }
 

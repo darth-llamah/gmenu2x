@@ -20,33 +20,32 @@
 #ifndef MENUSETTINGBOOL_H
 #define MENUSETTINGBOOL_H
 
-#include "iconbutton.h"
 #include "menusetting.h"
+#include "inputmanager.h"
 
-using std::string;
 class GMenu2X;
 
 class MenuSettingBool : public MenuSetting {
 private:
+	void initButton();
+	void toggle();
+
 	bool originalValue;
 	bool *_value;
 	int *_ivalue;
-	string strvalue;
-	GMenu2X *gmenu2x;
-	IconButton *btnToggle;
-
-	void toggle();
+	std::string strvalue;
 
 public:
-	MenuSettingBool(GMenu2X *gmenu2x, string name, string description, bool *value);
-	MenuSettingBool(GMenu2X *gmenu2x, string name, string description, int *value);
-	virtual ~MenuSettingBool() {};
+	MenuSettingBool(
+			GMenu2X *gmenu2x, const std::string &name,
+			const std::string &description, bool *value);
+	MenuSettingBool(
+			GMenu2X *gmenu2x, const std::string &name,
+			const std::string &description, int *value);
+	virtual ~MenuSettingBool() {}
 
 	virtual void draw(int y);
-	virtual void handleTS();
-	virtual void manageInput();
-	virtual void adjustInput();
-	virtual void drawSelected(int y);
+	virtual bool manageInput(bevent_t *event);
 	virtual bool edited();
 
 	void setValue(int value);

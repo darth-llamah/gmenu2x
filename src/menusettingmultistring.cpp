@@ -18,63 +18,69 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 #include "menusettingmultistring.h"
-#include "utilities.h"
+#include "gmenu2x.h"
+#include "iconbutton.h"
+#include "FastDelegate.h"
 
-using namespace std;
-using namespace fastdelegate;
+#include <algorithm>
 
-MenuSettingMultiString::MenuSettingMultiString(GMenu2X *gmenu2x, string name, string description, string *value, vector<string> *choices)
-	: MenuSetting(gmenu2x,name,description) {
-	this->gmenu2x = gmenu2x;
-	this->choices = choices;
-	this->value = value;
-	originalValue = *value;
-	setSel( find(choices->begin(),choices->end(),*value)-choices->begin() );
+using std::find;
+using std::string;
+using std::vector;
+using fastdelegate::MakeDelegate;
 
-	btnDec = new IconButton(gmenu2x, "skin:imgs/buttons/left.png");
-	btnDec->setAction(MakeDelegate(this, &MenuSettingMultiString::decSel));
+MenuSettingMultiString::MenuSettingMultiString(
+		GMenu2X *gmenu2x, const string &name,
+		const string &description, string *value,
+		const vector<string> *choices_)
+	: MenuSettingStringBase(gmenu2x, name, description, value)
+	, choices(choices_)
+{
+	setSel(find(choices->begin(), choices->end(), *value) - choices->begin());
 
-	btnInc = new IconButton(gmenu2x, "skin:imgs/buttons/right.png", gmenu2x->tr["Change value"]);
-	btnInc->setAction(MakeDelegate(this, &MenuSettingMultiString::incSel));
+	IconButton *btn;
+
+	btn = new IconButton(gmenu2x, "skin:imgs/buttons/left.png");
+	btn->setAction(MakeDelegate(this, &MenuSettingMultiString::decSel));
+	buttonBox.add(btn);
+
+	btn = new IconButton(gmenu2x, "skin:imgs/buttons/right.png", gmenu2x->tr["Change value"]);
+	btn->setAction(MakeDelegate(this, &MenuSettingMultiString::incSel));
+	buttonBox.add(btn);
 }
 
-void MenuSettingMultiString::draw(int y) {
-	MenuSetting::draw(y);
-	gmenu2x->s->write( gmenu2x->font, *value, 155, y+gmenu2x->font->getHalfHeight(), SFontHAlignLeft, SFontVAlignMiddle );
+bool MenuSettingMultiString::manageInput(bevent_t *event)
+{
+    switch(event->button) {
+        case LEFT:
+            decSel();
+            break;
+        case RIGHT:
+            incSel();
+            break;
+        default:
+			return false;
+    }
+	return true;
 }
 
-void MenuSettingMultiString::handleTS() {
-	btnDec->handleTS();
-	btnInc->handleTS();
+void MenuSettingMultiString::incSel()
+{
+	setSel(selected + 1);
 }
 
-void MenuSettingMultiString::manageInput() {
-	if ( gmenu2x->input[ACTION_LEFT ] ) decSel();
-	if ( gmenu2x->input[ACTION_RIGHT] ) incSel();
+void MenuSettingMultiString::decSel()
+{
+	setSel(selected - 1);
 }
 
-void MenuSettingMultiString::incSel() {
-	setSel(selected+1);
-}
-
-void MenuSettingMultiString::decSel() {
-	setSel(selected-1);
-}
-
-void MenuSettingMultiString::setSel(int sel) {
-	if (sel<0) sel = choices->size()-1;
-	else if (sel>=(int)choices->size()) sel = 0;
+void MenuSettingMultiString::setSel(int sel)
+{
+	if (sel < 0) {
+		sel = choices->size()-1;
+	} else if (sel >= (int)choices->size()) {
+		sel = 0;
+	}
 	selected = sel;
-	*value = (*choices)[sel];
-}
-
-void MenuSettingMultiString::adjustInput() {}
-
-void MenuSettingMultiString::drawSelected(int) {
-	gmenu2x->drawButton(btnInc,
-	gmenu2x->drawButton(btnDec)-6);
-}
-
-bool MenuSettingMultiString::edited() {
-	return originalValue != *value;
+	setValue((*choices)[sel]);
 }

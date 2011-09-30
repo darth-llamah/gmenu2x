@@ -20,13 +20,12 @@
 #ifndef SURFACECOLLECTION_H
 #define SURFACECOLLECTION_H
 
-#include <google/dense_hash_map>
+#include <string>
+#include <tr1/unordered_map>
 
-#include "surface.h"
-#include "utilities.h"
+class Surface;
 
-using google::dense_hash_map;
-typedef dense_hash_map<string, Surface *> SurfaceHash;
+typedef std::tr1::unordered_map<std::string, Surface *> SurfaceHash;
 
 /**
 Hash Map of surfaces that loads surfaces not already loaded and reuses already loaded ones.
@@ -34,30 +33,32 @@ Hash Map of surfaces that loads surfaces not already loaded and reuses already l
 	@author Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
 */
 class SurfaceCollection {
-private:
-	SurfaceHash surfaces;
-	string skin;
-
 public:
-	SurfaceCollection(bool defaultAlpha=true, string skin="default");
+	SurfaceCollection();
 	~SurfaceCollection();
 
-	void setSkin(string skin);
-	string getSkinFilePath(string file);
+	void setSkin(const std::string &skin);
+	std::string getSkinFilePath(const std::string &file, bool useDefault = true);
+	static std::string getSkinFilePath(const std::string &skin, const std::string &file, bool useDefault = true);
+	static std::string getSkinPath(const std::string &skin);
 
 	bool defaultAlpha;
 	void debug();
 
-	Surface *add(Surface *s, string path);
-	Surface *add(string path, bool alpha=true);
-	Surface *addSkinRes(string path, bool alpha=true);
-	void     del(string path);
+	Surface *add(Surface *s, const std::string &path);
+	Surface *add(const std::string &path);
+	Surface *addSkinRes(const std::string &path, bool useDefault = true);
+	void     del(const std::string &path);
 	void     clear();
-	void     move(string from, string to);
-	bool     exists(string path);
+	void     move(const std::string &from, const std::string &to);
+	bool     exists(const std::string &path);
 
-	Surface *operator[](string);
-	Surface *skinRes(string);
+	Surface *operator[](const std::string &);
+	Surface *skinRes(const std::string &key, bool useDefault = true);
+
+private:
+	SurfaceHash surfaces;
+	std::string skin;
 };
 
 #endif

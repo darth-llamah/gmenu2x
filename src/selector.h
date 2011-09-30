@@ -24,6 +24,7 @@
 #include <string>
 #include "gmenu2x.h"
 #include "utilities.h"
+#include "dialog.h"
 
 #define SELECTOR_ELEMENTS 11
 
@@ -33,23 +34,25 @@ class FileLister;
 using std::string;
 using std::vector;
 
-class Selector {
+class Selector : protected Dialog {
 private:
 	int selRow;
-	GMenu2X *gmenu2x;
 	LinkApp *link;
+	string file, dir;
+	unordered_map<string, string> aliases;
 
-	hash_map<string, string> aliases;
 	void loadAliases();
-	string getAlias(string key);
+	string getAlias(const string &key);
 	void prepare(FileLister *fl, vector<string> *screens, vector<string> *titles);
 	void freeScreenshots(vector<string> *screens);
-	
+
 public:
-	string file, dir;
-	Selector(GMenu2X *gmenu2x, LinkApp *link, string selectorDir="");
-	
+	Selector(GMenu2X *gmenu2x, LinkApp *link, const string &selectorDir="");
+
 	int exec(int startSelection=0);
+
+	const string &getFile() { return file; }
+	const string &getDir() { return dir; }
 };
 
 #endif /*SELECTOR_H_*/
