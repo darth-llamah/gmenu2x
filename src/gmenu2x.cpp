@@ -226,7 +226,7 @@ void GMenu2X::initCPULimits() {
 	cpuFreqSafeMax = 800;
 	cpuFreqMenuDefault = 400;
 	cpuFreqAppDefault = 400;
-	cpuFreqMultiple = 133;
+	cpuFreqMultiple = 2;
 #else
 	cpuFreqMin = 30;
 	cpuFreqMax = 500;
@@ -1893,7 +1893,7 @@ void GMenu2X::scanner() {
 	scanPath(CARD_ROOT, &files);
 
 	const char *nandpath = NULL;
-
+#endif
 #if defined(PLATFORM_GP2X)
 	//Onyl gph firmware has nand
 	if (fwType=="gph" && !isF200())
