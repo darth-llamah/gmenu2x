@@ -42,6 +42,12 @@
 #	include <linux/kd.h>
 #endif
 
+#ifdef PLATFORM_DSPICA
+#	include <sys/ioctl.h>
+#	include <linux/vt.h>
+#	include <linux/kd.h>
+#endif
+
 //for browsing the filesystem
 #include <sys/stat.h>
 #include <sys/types.h>

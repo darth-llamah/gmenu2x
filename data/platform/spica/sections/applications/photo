@@ -2,5 +2,5 @@ title=Photo
 icon=skin:icons/photo.png
 exec=/usr/gp2x/gp2xmenu
 params=--disable-autorun --enable-terminate --view-photo
-clock=100
+clock=133
 wrapper=true
