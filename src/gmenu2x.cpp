@@ -1893,7 +1893,7 @@ void GMenu2X::scanner() {
 	scanPath(CARD_ROOT, &files);
 
 	const char *nandpath = NULL;
-#endif
+
 #if defined(PLATFORM_GP2X)
 	//Onyl gph firmware has nand
 	if (fwType=="gph" && !isF200())
