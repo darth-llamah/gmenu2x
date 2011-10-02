@@ -265,7 +265,7 @@ void GMenu2X::init() {
 	backlightHandle = fopen(
 #ifdef PLATFORM_NANONOTE
 		"/sys/class/backlight/gpm940b0-bl/brightness",
-#elif PLATFORM_SPICA
+#elif defined(PLATFORM_SPICA)
 		"/sys/class/backlight/s6d05a-lcd/brightness",
 #else
 		"/sys/class/backlight/pwm-backlight/brightness",
@@ -1857,6 +1857,24 @@ void GMenu2X::scanner() {
 
 #ifdef PLATFORM_PANDORA
 	//char *configpath = pnd_conf_query_searchpath();
+
+#elif defined PLATFORM_SPICA
+	if (confInt["menuClock"]<400) {
+		setClock(400);
+		scanbg.write(font,tr["Raising cpu clock to 400MHz"],5,lineY);
+		scanbg.blit(s,0,0);
+		s->flip();
+		lineY += 26;
+	}
+	scanbg.write(font,tr["Scanning SD filesystem..."],5,lineY);
+	scanbg.blit(s,0,0);
+	s->flip();
+	lineY += 26;
+
+	vector<string> files;
+	scanPath(CARD_ROOT, &files);
+
+	const char *nandpath = NULL;
 #else
 	if (confInt["menuClock"]<336) {
 		setClock(336);
