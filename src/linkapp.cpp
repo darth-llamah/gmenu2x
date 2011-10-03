@@ -43,11 +43,7 @@ LinkApp::LinkApp(GMenu2X *gmenu2x_, InputManager &inputMgr_,
 	file = linkfile;
 	wrapper = false;
 	dontleave = false;
-#ifdef PLATFORM_SPICA
 	setClock(400);
-#else
-	setClock(336);
-#endif
 	setVolume(-1);
 	//G
 	//setGamma(0);

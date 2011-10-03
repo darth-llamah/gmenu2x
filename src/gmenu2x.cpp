@@ -226,7 +226,7 @@ void GMenu2X::initCPULimits() {
 	cpuFreqSafeMax = 800;
 	cpuFreqMenuDefault = 400;
 	cpuFreqAppDefault = 400;
-	cpuFreqMultiple = 2;
+	cpuFreqMultiple = 24;
 #else
 	cpuFreqMin = 30;
 	cpuFreqMax = 500;
@@ -1859,9 +1859,9 @@ void GMenu2X::scanner() {
 	//char *configpath = pnd_conf_query_searchpath();
 
 #else
-	if (confInt["menuClock"]<336) {
-		setClock(336);
-		scanbg.write(font,tr["Raising cpu clock to 336MHz"],5,lineY);
+	if (confInt["menuClock"]<400) {
+		setClock(400);
+		scanbg.write(font,tr["Raising cpu clock to 400MHz"],5,lineY);
 		scanbg.blit(s,0,0);
 		s->flip();
 		lineY += 26;
@@ -1883,8 +1883,6 @@ void GMenu2X::scanner() {
 		nandpath = "/boot/local/nand";
 #elif defined(PLATFORM_DINGUX)
 	nandpath = "/media/ccnandb1";
-#elif defined(PLATFORM_SPICA)
-	nandpath = "/dev/mmcblk0p2"; //temporary solution for not messing in internal flash
 #endif
 
 	if (nandpath) {
