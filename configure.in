@@ -52,7 +52,7 @@ case "$GMENU2X_PLATFORM" in
 	spica)
 		AC_DEFINE(PLATFORM_SPICA)
 		PLATFORM="spica"
-		SCREEN_RES="480x320"
+		SCREEN_RES="320x240"
 	;;
 	default)
 		AC_MSG_WARN([*** No --enable-platform specified. Defaulting to "pc".])

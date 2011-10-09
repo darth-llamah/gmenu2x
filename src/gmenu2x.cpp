@@ -42,7 +42,7 @@
 #	include <linux/kd.h>
 #endif
 
-#ifdef PLATFORM_DSPICA
+#ifdef PLATFORM_SPICA
 #	include <sys/ioctl.h>
 #	include <linux/vt.h>
 #	include <linux/kd.h>
