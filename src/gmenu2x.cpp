@@ -957,7 +957,7 @@ int GMenu2X::getBackLight()
 		fscanf(backlightHandle, "%d", &val);
 		rewind(backlightHandle);
 		val = (val * 100) / 255;
-		if (val < 0) val = 0; else if (val > 100) val = 100;
+		if (val < 0) val = 0; else if (val > 255) val = 255;
 	}
 	return val;
 }
